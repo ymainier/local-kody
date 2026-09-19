@@ -4,6 +4,7 @@ import { z } from "zod";
 import { listPackages, savePackage } from "./packages.ts";
 import { defineCapability } from "./registry.ts";
 import { listSecretNames } from "./secrets.ts";
+import { getRun, listRuns } from "./store.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -85,5 +86,43 @@ defineCapability({
   inputSchema: z.object({}),
   async handler() {
     return listPackages();
+  },
+});
+
+defineCapability({
+  name: "runList",
+  domain: "runs",
+  description:
+    "List recorded runs, newest first: every job run, plus every execute that failed or carried an idempotencyKey. Results and logs are summarised; use runGet for one in full.",
+  keywords: ["run", "history", "log", "failed", "job", "last", "record"],
+  inputSchema: z.object({
+    packageName: z.string().optional().describe("@scope/leaf"),
+    jobName: z.string().optional(),
+    status: z.enum(["running", "success", "error"]).optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+  }),
+  async handler(input) {
+    return listRuns(input).map((run) => ({
+      id: run.id,
+      surface: run.surface,
+      packageName: run.packageName,
+      jobName: run.jobName,
+      status: run.status,
+      startedAt: run.startedAt,
+      durationMs: run.durationMs,
+      error: run.error ? run.error.split("\n")[0] : null,
+    }));
+  },
+});
+
+defineCapability({
+  name: "runGet",
+  domain: "runs",
+  description:
+    "Open one recorded run by id: its result, its error and the lines it logged.",
+  keywords: ["run", "detail", "result", "error", "logs", "why"],
+  inputSchema: z.object({ id: z.string().min(1) }),
+  async handler({ id }) {
+    return getRun(id);
   },
 });

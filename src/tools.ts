@@ -35,6 +35,13 @@ export const executeInputSchema = z.object({
     .record(z.string(), z.unknown())
     .optional()
     .describe("Passed as the first argument to main"),
+  idempotencyKey: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Pass a fresh id to make this call replayable. If your client times out, call again with the same key: you get the recorded result instead of a second run.",
+    ),
 });
 
 export type ExecuteInput = z.infer<typeof executeInputSchema>;
@@ -43,4 +50,4 @@ export const searchToolDescription =
   "Find capabilities, saved packages, guides and secret names. Empty input lists domains. Pass entity refs to open details and a ready-to-run execute module.";
 
 export const executeToolDescription =
-  "Run one TypeScript ES module in a sandbox (no filesystem, no env, network only via the host). `import { kody } from 'kody:runtime'` for capabilities; npm packages import by bare name; fetch supports {{secret:name}} placeholders.";
+  "Run one TypeScript ES module in a sandbox (no filesystem, no env, network only via the host). `import { kody } from 'kody:runtime'` for capabilities; npm packages import by bare name; fetch supports {{secret:name}} placeholders. Pass idempotencyKey on anything slow or with side effects, then reuse that key to recover the result after a timeout.";

@@ -19,6 +19,14 @@ type ExecuteResult = {
   error?: string;
   logs: Array<string>;
   durationMs: number;
+  runId?: string;
+  replayed?: boolean;
+};
+type RunSummary = {
+  id: string;
+  surface: string;
+  status: string;
+  error: string | null;
 };
 
 // Fake "GitHub" that checks the bearer token and serves public events.
@@ -85,6 +93,18 @@ export default async function readNote({ key }) {
   return await packageStorage().get(key)
 }`,
 );
+
+// A run left `running` by a daemon that died. Seeding it before the daemon
+// starts is what a crash mid-execute leaves behind.
+process.env.KODY_HOME = kodyHome;
+const store = await import("../src/store.ts");
+store.startRun({
+  id: "stranded-run",
+  surface: "execute",
+  idempotencyKey: "stranded-key",
+  startedAt: new Date(Date.now() - 600_000).toISOString(),
+});
+store.closeDatabase();
 
 // A Unix socket path has about 100 characters to play with, so it goes
 // straight under /tmp rather than inside the (long) temp home.
@@ -156,8 +176,12 @@ async function callText(name: string, args: Record<string, unknown>) {
   return await callTextOn(client, name, args);
 }
 
-async function run(code: string, params: Record<string, unknown> = {}) {
-  const { text } = await callText("execute", { code, params });
+async function run(
+  code: string,
+  params: Record<string, unknown> = {},
+  extra: Record<string, unknown> = {},
+) {
+  const { text } = await callText("execute", { code, params, ...extra });
   return JSON.parse(text) as ExecuteResult;
 }
 
@@ -373,6 +397,57 @@ await step(
     return JSON.stringify(outcome.result);
   },
 );
+
+await step("the same idempotencyKey replays one sandbox run", async () => {
+  const code = `export default async function main() {
+  return { nonce: crypto.randomUUID() }
+}`;
+  const first = await run(code, {}, { idempotencyKey: "replay-me" });
+  const second = await run(code, {}, { idempotencyKey: "replay-me" });
+  assert.equal(first.error, undefined, first.error ?? "");
+  assert.equal(second.replayed, true);
+  assert.equal(second.runId, first.runId);
+  assert.deepEqual(second.result, first.result);
+  return `${JSON.stringify(first.result)} replayed as run ${second.runId}`;
+});
+
+await step("a failed execute is recorded and listed", async () => {
+  const failed = await run(`export default async function main() {
+  throw new Error('kaboom from the sandbox')
+}`);
+  assert.match(failed.error ?? "", /kaboom from the sandbox/);
+  const listed = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.runList(params) }`,
+    { status: "error", limit: 50 },
+  );
+  const runs = listed.result as Array<RunSummary>;
+  const match = runs.find((record) => record.id === failed.runId);
+  assert.ok(match, `run ${String(failed.runId)} not in runList`);
+  assert.match(match.error ?? "", /kaboom/);
+  const detail = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.runGet(params) }`,
+    { id: failed.runId },
+  );
+  assert.match(
+    (detail.result as { error: string }).error,
+    /kaboom from the sandbox/,
+  );
+  return match.error ?? "";
+});
+
+await step("a run stranded by a dead daemon is reconciled", async () => {
+  const listed = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.runGet(params) }`,
+    { id: "stranded-run" },
+  );
+  const record = listed.result as RunSummary;
+  assert.equal(record.status, "error");
+  assert.equal(record.error, "interrupted");
+  return `${record.status}: ${record.error ?? ""}`;
+});
 
 await step("two proxies share one daemon concurrently", async () => {
   const second = await connectClient("e2e-second");

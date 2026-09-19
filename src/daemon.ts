@@ -6,9 +6,9 @@ import {
   type ServerResponse,
 } from "node:http";
 import "./capabilities.ts";
-import { execute } from "./executor.ts";
 import { importLegacyStorage } from "./package-storage.ts";
 import { socketFile } from "./paths.ts";
+import { executeRecorded, reconcileOnStartup } from "./runs.ts";
 import { search } from "./search.ts";
 import { executeInputSchema, searchInputSchema } from "./tools.ts";
 
@@ -28,7 +28,7 @@ async function route(path: string, body: unknown) {
     case "/tools/search":
       return { result: { text: search(searchInputSchema.parse(body)) } };
     case "/tools/execute":
-      return { result: await execute(executeInputSchema.parse(body)) };
+      return { result: await executeRecorded(executeInputSchema.parse(body)) };
     default:
       return { error: `No route ${path}` };
   }
@@ -73,6 +73,12 @@ if (existsSync(socketFile)) {
 }
 
 importLegacyStorage();
+const reconciled = reconcileOnStartup();
+if (reconciled.reconciled > 0) {
+  process.stderr.write(
+    `marked ${reconciled.reconciled} interrupted run(s) as errors\n`,
+  );
+}
 
 const server = createServer((request, response) => {
   void handle(request, response);

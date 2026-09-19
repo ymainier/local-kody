@@ -16,6 +16,7 @@ export type ExecuteOutcome = {
 };
 
 const maxResultBytes = 100_000;
+export const defaultExecuteTimeoutMs = 60_000;
 
 // One core module per run holds the gateway plumbing, so its side effects (the
 // fetch and console patches) happen exactly once however many facades import
@@ -229,7 +230,7 @@ export async function execute(input: {
       "data",
       (chunk: Buffer) => (stderr += chunk.toString("utf8")),
     );
-    const timeoutMs = input.timeoutMs ?? 60_000;
+    const timeoutMs = input.timeoutMs ?? defaultExecuteTimeoutMs;
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
