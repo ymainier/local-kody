@@ -1,11 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { storageOwnerFor } from "./package-storage.ts";
 import { listPackages, savePackage } from "./packages.ts";
 import { defineCapability } from "./registry.ts";
 import { listSecretNames } from "./secrets.ts";
-import { storageGet, storageSet } from "./store.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -87,40 +85,5 @@ defineCapability({
   inputSchema: z.object({}),
   async handler() {
     return listPackages();
-  },
-});
-
-// Storage lives in SQLite, one bucket per owner. `namespace` still names the
-// bucket here; step 3 replaces it with a package identity taken from the
-// importing module rather than from an argument.
-const storageInput = z.object({
-  namespace: z
-    .string()
-    .regex(/^[a-z0-9-]+$/)
-    .describe("Usually the package leaf"),
-  key: z.string().min(1),
-});
-
-defineCapability({
-  name: "storageGet",
-  domain: "storage",
-  description:
-    "Read a JSON value saved with storageSet. Returns null when missing.",
-  keywords: ["storage", "state", "cursor", "remember", "read", "get"],
-  inputSchema: storageInput,
-  async handler({ namespace, key }) {
-    return storageGet(storageOwnerFor(namespace), key);
-  },
-});
-
-defineCapability({
-  name: "storageSet",
-  domain: "storage",
-  description:
-    "Save a JSON value (a cursor, last-seen id, settings) that survives between runs.",
-  keywords: ["storage", "state", "cursor", "remember", "write", "set", "save"],
-  inputSchema: storageInput.extend({ value: z.unknown() }),
-  async handler({ namespace, key, value }) {
-    return storageSet(storageOwnerFor(namespace), key, value);
   },
 });

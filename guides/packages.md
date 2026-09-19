@@ -6,7 +6,7 @@ Save code as a package when the user will ask the same thing again, or wants it 
 
 - Name: `@me/<leaf>`, lowercase with dashes.
 - Each export is one file whose default export is an async function taking one object argument.
-- Keep state (cursors, last-seen ids) in `kody.storageGet` / `kody.storageSet` with `namespace` set to the package leaf.
+- Keep state (cursors, last-seen ids) in `packageStorage()` from `kody:runtime`; the bucket belongs to the package. See guide:storage.
 - Credentials: use `{{secret:name}}` inside fetch. Never put a secret value in code.
 
 ## Save it

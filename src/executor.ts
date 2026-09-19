@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { init, parse } from "es-module-lexer";
 import { registerRun, startGateway } from "./gateway.ts";
-import { resolveKodyImport } from "./packages.ts";
+import { packageRoot, parseKodyImport, resolveKodyImport } from "./packages.ts";
 import { denoBin } from "./paths.ts";
 
 export type ExecuteOutcome = {
@@ -17,14 +17,19 @@ export type ExecuteOutcome = {
 
 const maxResultBytes = 100_000;
 
-function runtimeSource(gatewayPort: number, runId: string) {
+// One core module per run holds the gateway plumbing, so its side effects (the
+// fetch and console patches) happen exactly once however many facades import
+// it. Each facade re-exports the core bound to one package's token.
+function runtimeCoreSource(gatewayPort: number, runId: string) {
   return `
 const gatewayUrl = 'http://127.0.0.1:${gatewayPort}'
 const nativeFetch = globalThis.fetch.bind(globalThis)
-export async function post(path, body) {
+export async function post(path, body, token) {
+  const headers = { 'x-kody-run': '${runId}' }
+  if (token) headers['x-kody-token'] = token
   const response = await nativeFetch(gatewayUrl + path, {
     method: 'POST',
-    headers: { 'x-kody-run': '${runId}' },
+    headers,
     body: JSON.stringify(body),
   })
   const data = await response.json()
@@ -45,9 +50,40 @@ const format = (parts) => parts.map((part) => typeof part === 'string' ? part : 
 for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
   console[level] = (...parts) => void post('/log', { line: (level === 'log' ? '' : '[' + level + '] ') + format(parts) })
 }
-export const kody = new Proxy({}, {
-  get: (_, name) => async (input) => (await post('/call', { name: String(name), input })).result,
-})
+export function makeKody(token) {
+  return new Proxy({}, {
+    get: (_, name) => async (input) => (await post('/call', { name: String(name), input }, token)).result,
+  })
+}
+export function packageStorageFor(token) {
+  if (!token) {
+    throw new Error(
+      'packageStorage() belongs to a saved package, and this code is not one yet. ' +
+      'Save it with kody.packageSave({ name, description, files, exports }) and call packageStorage() from the saved module, ' +
+      'or import an export of a saved package and let it keep the state.',
+    )
+  }
+  const call = async (op, body) => (await post('/storage', { op, ...body }, token)).result
+  return {
+    get: (key) => call('get', { key }),
+    set: (key, value) => call('set', { key, value }),
+    list: () => call('list', {}),
+    delete: (key) => call('delete', { key }),
+  }
+}
+`;
+}
+
+// `token` is empty for ad hoc code, which is what makes packageStorage() throw
+// its "save this first" error there.
+function runtimeFacadeSource(token: string) {
+  return `
+import { makeKody, packageStorageFor, post } from './runtime-core.js'
+export { post }
+export const kody = makeKody('${token}')
+export function packageStorage() {
+  return packageStorageFor('${token}')
+}
 `;
 }
 
@@ -65,9 +101,12 @@ try {
 
 // Like Kody: scan literal imports. Bare names become npm packages at latest,
 // `kody:@scope/leaf/export` becomes the saved package file (scanned transitively).
-async function buildImportMap(code: string, runtimePath: string) {
+// Every package met on the way gets an import-map scope so that files inside its
+// folder — and only those — resolve `kody:runtime` to that package's facade.
+async function buildImportMap(code: string, rootRuntimePath: string) {
   await init;
-  const imports: Record<string, string> = { "kody:runtime": runtimePath };
+  const imports: Record<string, string> = { "kody:runtime": rootRuntimePath };
+  const packageNames = new Set<string>();
   const queue = [code];
   while (queue.length > 0) {
     const [found] = parse(queue.pop() ?? "");
@@ -76,6 +115,7 @@ async function buildImportMap(code: string, runtimePath: string) {
       if (specifier.startsWith("kody:@")) {
         const file = resolveKodyImport(specifier);
         imports[specifier] = file;
+        packageNames.add(parseKodyImport(specifier).name);
         queue.push(await readFile(file, "utf8"));
         continue;
       }
@@ -89,7 +129,7 @@ async function buildImportMap(code: string, runtimePath: string) {
       imports[`${name}/`] = `npm:/${name}/`;
     }
   }
-  return { imports };
+  return { imports, packageNames: [...packageNames] };
 }
 
 function sandboxEnv() {
@@ -119,9 +159,11 @@ export async function execute(input: {
   const gatewayPort = await startGateway();
   const runId = randomUUID();
   const logs: Array<string> = [];
+  const tokens = new Map<string, string>();
   let settled: { result?: unknown; error?: string } | null = null;
   const unregister = registerRun(runId, {
     logs,
+    tokens,
     settle: (outcome) => (settled = outcome),
   });
   const runDir = await mkdtemp(join(tmpdir(), "kody-run-"));
@@ -141,13 +183,29 @@ export async function execute(input: {
     return { ...outcome, logs, durationMs };
   };
   try {
-    const runtimePath = join(runDir, "runtime.js");
-    await writeFile(runtimePath, runtimeSource(gatewayPort, runId));
+    const rootRuntimePath = join(runDir, "runtime-root.js");
+    await writeFile(
+      join(runDir, "runtime-core.js"),
+      runtimeCoreSource(gatewayPort, runId),
+    );
+    await writeFile(rootRuntimePath, runtimeFacadeSource(""));
     await writeFile(join(runDir, "entry.ts"), input.code);
     await writeFile(join(runDir, "main.ts"), mainSource);
+    const { imports, packageNames } = await buildImportMap(
+      input.code,
+      rootRuntimePath,
+    );
+    const scopes: Record<string, Record<string, string>> = {};
+    for (const packageName of packageNames) {
+      const token = randomUUID();
+      tokens.set(token, packageName);
+      const facadePath = join(runDir, `runtime-${token}.js`);
+      await writeFile(facadePath, runtimeFacadeSource(token));
+      scopes[`${packageRoot(packageName)}/`] = { "kody:runtime": facadePath };
+    }
     await writeFile(
       join(runDir, "deno.json"),
-      JSON.stringify(await buildImportMap(input.code, runtimePath)),
+      JSON.stringify({ imports, scopes }),
     );
     const child = spawn(
       denoBin,

@@ -61,11 +61,29 @@ writeFileSync(
   }),
 );
 
-// A phase 1 storage file the server should import into SQLite on first start.
+// A phase 1 storage file, plus the package whose leaf names it, so the daemon
+// has something to import into that package's bucket on first start.
 mkdirSync(join(kodyHome, "storage"), { recursive: true });
 writeFileSync(
   join(kodyHome, "storage", "legacy-notes.json"),
   JSON.stringify({ greeting: "from the json era" }),
+);
+const legacyPackageDir = join(kodyHome, "packages", "@me", "legacy-notes");
+mkdirSync(legacyPackageDir, { recursive: true });
+writeFileSync(
+  join(legacyPackageDir, "package.json"),
+  JSON.stringify({
+    name: "@me/legacy-notes",
+    description: "Notes kept before the SQLite store existed",
+    exports: { "./readNote": "./notes.ts" },
+  }),
+);
+writeFileSync(
+  join(legacyPackageDir, "notes.ts"),
+  `import { packageStorage } from 'kody:runtime'
+export default async function readNote({ key }) {
+  return await packageStorage().get(key)
+}`,
 );
 
 // A Unix socket path has about 100 characters to play with, so it goes
@@ -214,9 +232,10 @@ export default async function main(params) {
   },
 );
 
-const whatShippedSource = `import { kody } from 'kody:runtime'
+const whatShippedSource = `import { packageStorage } from 'kody:runtime'
 export default async function whatShipped({ baseUrl, login }) {
-  const sinceId = await kody.storageGet({ namespace: 'what-shipped', key: login })
+  const storage = packageStorage()
+  const sinceId = await storage.get(login)
   const response = await fetch(baseUrl + '/users/' + login + '/events/public', {
     headers: { authorization: 'Bearer {{secret:githubToken}}' },
   })
@@ -225,7 +244,7 @@ export default async function whatShipped({ baseUrl, login }) {
   const shipped = fresh
     .filter((event) => (event.type === 'ReleaseEvent' && event.payload.action === 'published') || (event.type === 'CreateEvent' && event.payload.ref_type === 'repository'))
     .map((event) => event.type + ' ' + event.repo.name)
-  if (events[0]) await kody.storageSet({ namespace: 'what-shipped', key: login, value: events[0].id })
+  if (events[0]) await storage.set(login, events[0].id)
   return { shipped, message: shipped.length ? shipped.length + ' new' : 'nothing new' }
 }`;
 
@@ -269,27 +288,54 @@ export default async function main(params) { return await whatShipped(params) }`
   return `1st: ${JSON.stringify(first.result)} / 2nd: ${JSON.stringify(second.result)}`;
 });
 
-await step("storage written by one execute is read by the next", async () => {
-  const write = await run(
-    `import { kody } from 'kody:runtime'
-export default async function main(params) { return await kody.storageSet(params) }`,
-    { namespace: "handoff", key: "cursor", value: { page: 7 } },
+const counterSource = `import { packageStorage } from 'kody:runtime'
+export default async function bump({ value }) {
+  const storage = packageStorage()
+  await storage.set('cursor', value)
+  return { cursor: await storage.get('cursor'), keys: await storage.list() }
+}`;
+
+await step("two packages keep separate values for the same key", async () => {
+  const save = `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.packageSave(params) }`;
+  for (const leaf of ["counter-a", "counter-b"]) {
+    const saved = await run(save, {
+      name: `@me/${leaf}`,
+      description: `Counter ${leaf}`,
+      files: { "bump.ts": counterSource },
+      exports: { "./bump": "./bump.ts" },
+    });
+    assert.equal(saved.error, undefined, saved.error ?? "");
+  }
+  const outcome = await run(
+    `import bumpA from 'kody:@me/counter-a/bump'
+import bumpB from 'kody:@me/counter-b/bump'
+export default async function main() {
+  const a = await bumpA({ value: 'alpha' })
+  const b = await bumpB({ value: 'beta' })
+  return { a: a.cursor, b: b.cursor, again: (await bumpA({ value: 'alpha' })).cursor }
+}`,
   );
-  assert.equal(write.error, undefined, write.error ?? "");
-  const read = await run(
-    `import { kody } from 'kody:runtime'
-export default async function main(params) { return await kody.storageGet(params) }`,
-    { namespace: "handoff", key: "cursor" },
-  );
-  assert.deepEqual(read.result, { page: 7 });
-  return JSON.stringify(read.result);
+  assert.equal(outcome.error, undefined, outcome.error ?? "");
+  assert.deepEqual(outcome.result, { a: "alpha", b: "beta", again: "alpha" });
+  return JSON.stringify(outcome.result);
 });
 
-await step("phase 1 storage json is imported into SQLite", async () => {
+await step("ad hoc code calling packageStorage() is told to save", async () => {
   const outcome = await run(
-    `import { kody } from 'kody:runtime'
-export default async function main(params) { return await kody.storageGet(params) }`,
-    { namespace: "legacy-notes", key: "greeting" },
+    `import { packageStorage } from 'kody:runtime'
+export default async function main() { return await packageStorage().get('cursor') }`,
+  );
+  assert.match(outcome.error ?? "", /belongs to a saved package/);
+  assert.match(outcome.error ?? "", /kody\.packageSave/);
+  return (outcome.error ?? "").split("\n")[0]?.slice(0, 80) ?? "";
+});
+
+await step("phase 1 storage json lands in its package's bucket", async () => {
+  const outcome = await run(
+    `import readNote from 'kody:@me/legacy-notes/readNote'
+export default async function main(params) { return await readNote(params) }`,
+    { key: "greeting" },
   );
   assert.equal(outcome.result, "from the json era");
   return String(outcome.result);
@@ -330,10 +376,10 @@ await step(
 
 await step("two proxies share one daemon concurrently", async () => {
   const second = await connectClient("e2e-second");
-  const code = `import { kody } from 'kody:runtime'
+  const code = `import bump from 'kody:@me/counter-a/bump'
 export default async function main(params) {
-  await kody.storageSet({ namespace: 'concurrent', key: params.key, value: params.key })
-  return await kody.storageGet({ namespace: 'concurrent', key: params.key })
+  await bump({ value: params.key })
+  return params.key
 }`;
   const [first, other, index] = await Promise.all([
     callTextOn(client, "execute", { code, params: { key: "one" } }),

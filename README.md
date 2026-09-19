@@ -7,7 +7,7 @@ A local, single-user take on [kentcdodds/kody](https://github.com/kentcdodds/kod
 
 The MCP server you point a client at is a thin proxy. All the work happens in a background daemon that owns the SQLite store, the gateway and the sandbox, so it outlives the app and several clients can share one copy of the state.
 
-Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare name, imports saved packages as `kody:@me/<leaf>/<export>`, and writes `{{secret:name}}` wherever a credential goes. The gateway swaps in the real value, and only for hosts you approved.
+Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare name, imports saved packages as `kody:@me/<leaf>/<export>`, keeps state in `packageStorage()`, and writes `{{secret:name}}` wherever a credential goes. The gateway swaps in the real value, and only for hosts you approved.
 
 ## Requirements
 
@@ -61,18 +61,18 @@ State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `kody.d
 
 ## Layout
 
-| File                  | Role                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------ |
-| `src/server.ts`       | MCP stdio proxy: forwards `search` and `execute` to the daemon socket                |
-| `src/daemon.ts`       | Long-lived host: store, gateway, executor, search over a Unix socket                 |
-| `src/tools.ts`        | The two tool schemas and the server instructions, shared by both                     |
-| `src/launchd.ts`      | `daemon:install` / `daemon:uninstall` / `daemon:logs`                                |
-| `src/registry.ts`     | `defineCapability`, Zod-validated host functions                                     |
-| `src/capabilities.ts` | `notifySelf`, `secretList`, `packageSave`, `packageList`, `storageGet`, `storageSet` |
-| `src/search.ts`       | Lexical ranking, domain index, entity detail with ready-to-run modules               |
-| `src/executor.ts`     | Import scanning, import map, `deno run` with locked permissions                      |
-| `src/gateway.ts`      | The sandbox's only reachable address: `/call`, `/fetch`, `/log`, `/settle`           |
-| `src/secrets.ts`      | Secret store and `{{secret:name}}` substitution per approved host                    |
-| `src/packages.ts`     | Saved packages and `kody:@scope/leaf/export` resolution                              |
-| `src/store.ts`        | SQLite store: versioned migrations and package storage                               |
-| `guides/*.md`         | Docs for the agent, found through search                                             |
+| File                  | Role                                                                       |
+| --------------------- | -------------------------------------------------------------------------- |
+| `src/server.ts`       | MCP stdio proxy: forwards `search` and `execute` to the daemon socket      |
+| `src/daemon.ts`       | Long-lived host: store, gateway, executor, search over a Unix socket       |
+| `src/tools.ts`        | The two tool schemas and the server instructions, shared by both           |
+| `src/launchd.ts`      | `daemon:install` / `daemon:uninstall` / `daemon:logs`                      |
+| `src/registry.ts`     | `defineCapability`, Zod-validated host functions                           |
+| `src/capabilities.ts` | `notifySelf`, `secretList`, `packageSave`, `packageList`                   |
+| `src/search.ts`       | Lexical ranking, domain index, entity detail with ready-to-run modules     |
+| `src/executor.ts`     | Import scanning, import map, `deno run` with locked permissions            |
+| `src/gateway.ts`      | The sandbox's only reachable address: `/call`, `/fetch`, `/log`, `/settle` |
+| `src/secrets.ts`      | Secret store and `{{secret:name}}` substitution per approved host          |
+| `src/packages.ts`     | Saved packages and `kody:@scope/leaf/export` resolution                    |
+| `src/store.ts`        | SQLite store: versioned migrations and package storage                     |
+| `guides/*.md`         | Docs for the agent, found through search                                   |

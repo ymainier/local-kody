@@ -18,7 +18,7 @@ export type PackageManifest = {
 
 const packageNamePattern = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
 
-function packageRoot(name: string) {
+export function packageRoot(name: string) {
   if (!packageNamePattern.test(name)) {
     throw new Error(
       `Package name "${name}" must look like @scope/leaf (lowercase)`,
@@ -81,10 +81,14 @@ export function getPackage(name: string) {
 }
 
 // `kody:@me/what-shipped/whatShipped` -> absolute file path of that export.
-export function resolveKodyImport(specifier: string) {
+export function parseKodyImport(specifier: string) {
   const match = /^kody:(@[a-z0-9-]+\/[a-z0-9-]+)\/(.+)$/.exec(specifier);
   if (!match) throw new Error(`Bad package import "${specifier}"`);
-  const [, name, exportName] = match;
+  return { name: match[1] ?? "", exportName: match[2] ?? "" };
+}
+
+export function resolveKodyImport(specifier: string) {
+  const { name, exportName } = parseKodyImport(specifier);
   const manifest = getPackage(name);
   if (!manifest) throw new Error(`No saved package named ${name}`);
   const target = manifest.exports[`./${exportName}`];
