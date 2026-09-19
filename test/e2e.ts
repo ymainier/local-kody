@@ -29,8 +29,19 @@ type RunSummary = {
   error: string | null;
 };
 
-// Fake "GitHub" that checks the bearer token and serves public events.
+// Fake "GitHub" that checks the bearer token and serves public events, plus a
+// fake npm registry under /npm so dependency pinning never touches the network.
 const api = createServer((request, response) => {
+  const npmMatch = /^\/npm\/(.+)\/latest$/.exec(request.url ?? "");
+  if (npmMatch) {
+    const versions: Record<string, string> = { "date-fns": "4.1.0" };
+    const version = versions[decodeURIComponent(npmMatch[1] ?? "")];
+    if (!version) {
+      response.statusCode = 404;
+      return response.end(JSON.stringify({ error: "Not found" }));
+    }
+    return response.end(JSON.stringify({ version }));
+  }
   if (request.headers.authorization !== "Bearer gh-test-token") {
     response.statusCode = 401;
     return response.end(JSON.stringify({ message: "Bad credentials" }));
@@ -113,6 +124,7 @@ const childEnv = {
   ...(process.env as Record<string, string>),
   KODY_HOME: kodyHome,
   KODY_SOCKET: socketFile,
+  KODY_NPM_REGISTRY: `${apiUrl}/npm`,
 };
 
 const daemon = spawn(
@@ -344,6 +356,84 @@ export default async function main() {
   assert.deepEqual(outcome.result, { a: "alpha", b: "beta", again: "alpha" });
   return JSON.stringify(outcome.result);
 });
+
+const savePackage = `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.packageSave(params) }`;
+
+await step(
+  "a save with a type error is rejected, old version survives",
+  async () => {
+    const broken = await run(savePackage, {
+      name: "@me/what-shipped",
+      description: "Broken rewrite",
+      files: {
+        "what-shipped.ts": `export default async function whatShipped() {
+  const count: number = 'not a number'
+  return count
+}`,
+      },
+      exports: { "./whatShipped": "./what-shipped.ts" },
+    });
+    assert.match(broken.error ?? "", /nothing changed on disk/);
+    assert.match(broken.error ?? "", /deno check failed/);
+    const still = await run(
+      `import whatShipped from 'kody:@me/what-shipped/whatShipped'
+export default async function main(params) { return await whatShipped(params) }`,
+      { baseUrl: apiUrl, login: "kody-bot" },
+    );
+    assert.equal(still.error, undefined, still.error ?? "");
+    assert.equal((still.result as { message: string }).message, "nothing new");
+    return (broken.error ?? "").split("\n")[1] ?? "";
+  },
+);
+
+await step("a save whose export file is missing is rejected", async () => {
+  const outcome = await run(savePackage, {
+    name: "@me/typo",
+    description: "Points at a file that was never sent",
+    files: { "there.ts": "export default async function there() { return 1 }" },
+    exports: { "./there": "./not-there.ts" },
+  });
+  assert.match(outcome.error ?? "", /missing file \.\/not-there\.ts/);
+  const listed = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main() { return await kody.packageList() }`,
+  );
+  const names = (listed.result as Array<{ name: string }>).map(
+    (manifest) => manifest.name,
+  );
+  assert.ok(!names.includes("@me/typo"), "the rejected package was written");
+  return (outcome.error ?? "").split("\n")[1] ?? "";
+});
+
+await step(
+  "a clean save pins every npm import to an exact version",
+  async () => {
+    const saved = await run(savePackage, {
+      name: "@me/until-christmas",
+      description: "Days from a date to Christmas",
+      files: {
+        "days.ts": `import { differenceInCalendarDays } from 'date-fns'
+export default async function days({ from }) {
+  const start = new Date(from)
+  return differenceInCalendarDays(new Date(start.getFullYear(), 11, 25), start)
+}`,
+      },
+      exports: { "./days": "./days.ts" },
+    });
+    assert.equal(saved.error, undefined, saved.error ?? "");
+    assert.deepEqual((saved.result as { dependencies: unknown }).dependencies, {
+      "date-fns": "4.1.0",
+    });
+    const used = await run(
+      `import days from 'kody:@me/until-christmas/days'
+export default async function main(params) { return await days(params) }`,
+      { from: "2026-12-01T00:00:00.000Z" },
+    );
+    assert.equal(used.result, 24);
+    return `date-fns pinned to 4.1.0, ${String(used.result)} days to go`;
+  },
+);
 
 await step("ad hoc code calling packageStorage() is told to save", async () => {
   const outcome = await run(

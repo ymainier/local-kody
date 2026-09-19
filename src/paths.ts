@@ -8,6 +8,7 @@ const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const kodyHome = process.env.KODY_HOME ?? join(homedir(), ".local-kody");
 export const packagesDir = join(kodyHome, "packages");
 export const storageDir = join(kodyHome, "storage");
+export const stagingDir = join(kodyHome, "staging");
 export const secretsFile = join(kodyHome, "secrets.json");
 export const dbFile = process.env.KODY_DB ?? join(kodyHome, "kody.db");
 export const socketFile =
@@ -19,6 +20,6 @@ export const denoBin =
   process.env.KODY_DENO_BIN ??
   join(projectRoot, "node_modules", ".bin", "deno");
 
-for (const directory of [kodyHome, packagesDir, logsDir]) {
+for (const directory of [kodyHome, packagesDir, stagingDir, logsDir]) {
   mkdirSync(directory, { recursive: true });
 }

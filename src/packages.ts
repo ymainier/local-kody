@@ -1,11 +1,6 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join, normalize } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
 import { packagesDir } from "./paths.ts";
 
 // A package is a folder with a package.json whose `exports` map names the
@@ -14,7 +9,27 @@ export type PackageManifest = {
   name: string;
   description: string;
   exports: Record<string, string>;
+  dependencies?: Record<string, string>;
+  kody?: { jobs?: Record<string, JobDefinition> };
 };
+
+export type JobDefinition = z.infer<typeof jobDefinitionSchema>;
+
+export const jobDefinitionSchema = z.object({
+  entry: z
+    .string()
+    .describe("Package-local module whose default export takes no arguments"),
+  schedule: z.object({
+    type: z.literal("cron"),
+    expression: z.string().min(1).describe('Five fields, e.g. "0 8 * * *"'),
+  }),
+  timezone: z.string().optional().describe('IANA name, e.g. "Europe/London"'),
+  enabled: z.boolean().optional(),
+});
+
+export const packageKodySchema = z.object({
+  jobs: z.record(z.string(), jobDefinitionSchema).optional(),
+});
 
 const packageNamePattern = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
 
@@ -25,37 +40,6 @@ export function packageRoot(name: string) {
     );
   }
   return join(packagesDir, name);
-}
-
-export function savePackage(
-  input: PackageManifest & { files: Record<string, string> },
-) {
-  const root = packageRoot(input.name);
-  for (const [relativePath, source] of Object.entries(input.files)) {
-    const target = normalize(join(root, relativePath));
-    if (!target.startsWith(root + "/")) {
-      throw new Error(`File path "${relativePath}" escapes the package folder`);
-    }
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, source);
-  }
-  for (const [exportName, target] of Object.entries(input.exports)) {
-    if (!exportName.startsWith("./")) {
-      throw new Error(`Export "${exportName}" must start with ./`);
-    }
-    if (!existsSync(join(root, target))) {
-      throw new Error(
-        `Export "${exportName}" points at missing file ${target}`,
-      );
-    }
-  }
-  const manifest: PackageManifest = {
-    name: input.name,
-    description: input.description,
-    exports: input.exports,
-  };
-  writeFileSync(join(root, "package.json"), JSON.stringify(manifest, null, 2));
-  return manifest;
 }
 
 export function listPackages(): Array<PackageManifest> {

@@ -43,3 +43,14 @@ export default async function main(params) {
 ```
 
 Test the module with execute before saving, then invoke the saved export once to prove it works.
+
+## What a save checks
+
+`files` is the whole package: what you send replaces what was there. Before anything is swapped into place, the save
+
+- confirms every `exports` entry (and every job entry) points at a file you sent,
+- pins each bare npm import to an exact version in `package.json#dependencies`, keeping versions already pinned,
+- runs `deno check` over every export, and
+- imports every export in the sandbox without calling it, so a module that throws on load is caught here.
+
+If any check fails nothing is written, the previous version keeps running, and the error lists every failure at once.

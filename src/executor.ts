@@ -5,8 +5,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { init, parse } from "es-module-lexer";
 import { registerRun, startGateway } from "./gateway.ts";
-import { packageRoot, parseKodyImport, resolveKodyImport } from "./packages.ts";
+import {
+  getPackage,
+  packageRoot,
+  parseKodyImport,
+  resolveKodyImport,
+} from "./packages.ts";
 import { denoBin } from "./paths.ts";
+
+// A folder whose files count as one package: they get that package's storage
+// bucket and its pinned dependency versions. Saved packages produce these from
+// the import graph; packageSave produces one for the staging folder it is about
+// to check.
+export type PackageScope = {
+  folder: string;
+  packageName: string;
+  dependencies?: Record<string, string>;
+};
 
 export type ExecuteOutcome = {
   result?: unknown;
@@ -100,6 +115,29 @@ try {
 }
 `;
 
+// The npm package a bare specifier belongs to, or null when the specifier is
+// relative, absolute or already carries a scheme.
+export function npmPackageOf(specifier: string) {
+  if (/^(\.|\/|kody:|npm:|jsr:|node:|https?:|data:)/.test(specifier)) {
+    return null;
+  }
+  const parts = specifier.split("/");
+  return (
+    (specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0]) ?? null
+  );
+}
+
+// Pinned versions turn into import-map entries so a package keeps running
+// against the versions it was checked with.
+function pinnedImports(dependencies: Record<string, string> | undefined) {
+  const entries: Record<string, string> = {};
+  for (const [name, version] of Object.entries(dependencies ?? {})) {
+    entries[name] = `npm:${name}@${version}`;
+    entries[`${name}/`] = `npm:/${name}@${version}/`;
+  }
+  return entries;
+}
+
 // Like Kody: scan literal imports. Bare names become npm packages at latest,
 // `kody:@scope/leaf/export` becomes the saved package file (scanned transitively).
 // Every package met on the way gets an import-map scope so that files inside its
@@ -155,6 +193,8 @@ export async function execute(input: {
   code: string;
   params?: Record<string, unknown>;
   timeoutMs?: number;
+  extraImports?: Record<string, string>;
+  extraScopes?: Array<PackageScope>;
 }): Promise<ExecuteOutcome> {
   const startedAt = performance.now();
   const gatewayPort = await startGateway();
@@ -196,17 +236,31 @@ export async function execute(input: {
       input.code,
       rootRuntimePath,
     );
+    const scopeList: Array<PackageScope> = [
+      ...packageNames.map((packageName) => ({
+        folder: packageRoot(packageName),
+        packageName,
+        dependencies: getPackage(packageName)?.dependencies,
+      })),
+      ...(input.extraScopes ?? []),
+    ];
     const scopes: Record<string, Record<string, string>> = {};
-    for (const packageName of packageNames) {
+    for (const scope of scopeList) {
       const token = randomUUID();
-      tokens.set(token, packageName);
+      tokens.set(token, scope.packageName);
       const facadePath = join(runDir, `runtime-${token}.js`);
       await writeFile(facadePath, runtimeFacadeSource(token));
-      scopes[`${packageRoot(packageName)}/`] = { "kody:runtime": facadePath };
+      scopes[`${scope.folder}/`] = {
+        "kody:runtime": facadePath,
+        ...pinnedImports(scope.dependencies),
+      };
     }
     await writeFile(
       join(runDir, "deno.json"),
-      JSON.stringify({ imports, scopes }),
+      JSON.stringify({
+        imports: { ...imports, ...(input.extraImports ?? {}) },
+        scopes,
+      }),
     );
     const child = spawn(
       denoBin,

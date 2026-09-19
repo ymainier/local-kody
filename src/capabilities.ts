@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { listPackages, savePackage } from "./packages.ts";
+import { listPackages, packageKodySchema } from "./packages.ts";
+import { savePackage } from "./publish.ts";
 import { defineCapability } from "./registry.ts";
 import { listSecretNames } from "./secrets.ts";
 import { getRun, listRuns } from "./store.ts";
@@ -62,16 +63,27 @@ defineCapability({
   name: "packageSave",
   domain: "packages",
   description:
-    'Save code as a reusable package. Each export is a module whose default export is an async function. Afterwards any execute call can `import fn from "kody:@scope/leaf/<export>"`. Read guide:packages first.',
+    'Save code as a reusable package. Each export is a module whose default export is an async function. Afterwards any execute call can `import fn from "kody:@scope/leaf/<export>"`. `files` is the whole package: it replaces the previous version. The save is checked (exports exist, npm versions pinned, deno check, dry import) and rejected as a whole if any check fails, so a bad save leaves the old version running. Read guide:packages first.',
   keywords: ["save", "package", "reuse", "persist code", "export", "publish"],
   destructive: true,
   inputSchema: z.object({
     name: z.string().describe("@scope/leaf, lowercase"),
     description: z.string().describe("One line: what it does"),
-    files: z.record(z.string(), z.string()).describe("Relative path -> source"),
+    files: z
+      .record(z.string(), z.string())
+      .describe("Relative path -> source. The complete package."),
     exports: z
       .record(z.string(), z.string())
       .describe('"./name" -> "./file.ts"'),
+    dependencies: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        "Exact npm versions to pin. Anything missing is resolved to the latest.",
+      ),
+    kody: packageKodySchema
+      .optional()
+      .describe("Package manifest extras, currently { jobs }. See guide:jobs."),
   }),
   async handler(input) {
     return savePackage(input);
