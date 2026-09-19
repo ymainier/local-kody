@@ -14,13 +14,14 @@
     "daemon:uninstall": "node src/launchd.ts uninstall",
     "daemon:logs": "node src/launchd.ts logs",
     "secret": "node src/cli.ts",
-    "test": "node test/e2e.ts",
+    "test": "node test/scheduler.ts && node test/e2e.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "croner": "^10.0.1",
     "deno": "^2.9.6",
     "es-module-lexer": "^3.0.2",
     "zod": "^4.6.5"

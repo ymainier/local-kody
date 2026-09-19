@@ -3,6 +3,7 @@ import {
   defaultExecuteTimeoutMs,
   execute,
   type ExecuteOutcome,
+  type PackageScope,
 } from "./executor.ts";
 import {
   finishRun,
@@ -90,6 +91,8 @@ export async function runJob(job: {
   jobName: string;
   code: string;
   timeoutMs?: number;
+  extraImports?: Record<string, string>;
+  extraScopes?: Array<PackageScope>;
 }) {
   const id = randomUUID();
   startRun({
@@ -98,7 +101,12 @@ export async function runJob(job: {
     packageName: job.packageName,
     jobName: job.jobName,
   });
-  const outcome = await execute({ code: job.code, timeoutMs: job.timeoutMs });
+  const outcome = await execute({
+    code: job.code,
+    timeoutMs: job.timeoutMs,
+    extraImports: job.extraImports,
+    extraScopes: job.extraScopes,
+  });
   finishRun(id, outcome);
   return { ...outcome, runId: id };
 }

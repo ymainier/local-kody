@@ -5,6 +5,8 @@ A local, single-user take on [kentcdodds/kody](https://github.com/kentcdodds/kod
 - `search` finds capabilities, saved packages, guides and secret names.
 - `execute` runs one TypeScript module in a Deno sandbox. The sandbox has no filesystem, no env, no subprocesses, and network access to one local gateway port only.
 
+Saved code can also carry jobs: a cron schedule the daemon runs with no model in the loop, notifying you only when something happened.
+
 The MCP server you point a client at is a thin proxy. All the work happens in a background daemon that owns the SQLite store, the gateway and the sandbox, so it outlives the app and several clients can share one copy of the state.
 
 Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare name, imports saved packages as `kody:@me/<leaf>/<export>`, keeps state in `packageStorage()`, and writes `{{secret:name}}` wherever a credential goes. The gateway swaps in the real value, and only for hosts you approved.
@@ -18,7 +20,7 @@ Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare
 
 ```bash
 npm install
-npm test               # end-to-end checks, driving the proxy over MCP stdio
+npm test               # scheduler checks, then end-to-end over MCP stdio
 npm run daemon:install # launchd agent: starts at login, restarts on crash
 ```
 

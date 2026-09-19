@@ -6,6 +6,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import "./capabilities.ts";
+import { tickScheduler } from "./jobs.ts";
 import { importLegacyStorage } from "./package-storage.ts";
 import { socketFile } from "./paths.ts";
 import { executeRecorded, reconcileOnStartup } from "./runs.ts";
@@ -25,6 +26,12 @@ async function route(path: string, body: unknown) {
   switch (path) {
     case "/health":
       return { result: { ok: true, pid: process.pid } };
+    case "/scheduler/tick": {
+      // Not an MCP tool: the daemon's own maintenance surface, which is also
+      // how a test drives the scheduler without waiting for the wall clock.
+      const { now } = (body ?? {}) as { now?: string };
+      return { result: await tickScheduler(now ? new Date(now) : new Date()) };
+    }
     case "/tools/search":
       return { result: { text: search(searchInputSchema.parse(body)) } };
     case "/tools/execute":
@@ -86,6 +93,24 @@ const server = createServer((request, response) => {
 await new Promise<void>((resolve) => server.listen(socketFile, resolve));
 chmodSync(socketFile, 0o600);
 process.stderr.write(`local-kody daemon listening on ${socketFile}\n`);
+
+// One tick every 30 s. Occurrences missed between ticks coalesce into one run,
+// so a slept Mac or a restarted daemon catches up rather than storming.
+const schedulerIntervalMs = Number(
+  process.env.KODY_SCHEDULER_INTERVAL_MS ?? 30_000,
+);
+let ticking = false;
+setInterval(() => {
+  if (ticking) return;
+  ticking = true;
+  void tickScheduler()
+    .catch((error: unknown) => {
+      process.stderr.write(`scheduler tick failed: ${String(error)}\n`);
+    })
+    .finally(() => {
+      ticking = false;
+    });
+}, schedulerIntervalMs).unref();
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {

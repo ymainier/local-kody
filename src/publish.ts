@@ -148,6 +148,21 @@ async function resolveDependencies(
   return { dependencies, failures };
 }
 
+// Exports and job entries alike: a job entry that does not compile is a 8am
+// failure waiting to happen, so it is checked with everything else.
+function checkTargets(manifest: PackageManifest) {
+  return [
+    ...Object.entries(manifest.exports).map(([label, target]) => ({
+      label,
+      target,
+    })),
+    ...Object.entries(manifest.kody?.jobs ?? {}).map(([jobName, job]) => ({
+      label: `job:${jobName}`,
+      target: job.entry,
+    })),
+  ];
+}
+
 async function typeCheck(root: string, manifest: PackageManifest) {
   const workspace = join(stagingDir, `check-${randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
@@ -166,7 +181,7 @@ async function typeCheck(root: string, manifest: PackageManifest) {
       join(workspace, "deno.json"),
       JSON.stringify({ imports, compilerOptions: { noImplicitAny: false } }),
     );
-    const targets = Object.values(manifest.exports).map((target) =>
+    const targets = checkTargets(manifest).map(({ target }) =>
       join(root, target),
     );
     await execFileAsync(
@@ -194,18 +209,18 @@ async function typeCheck(root: string, manifest: PackageManifest) {
 // throws while loading, or whose default export is not a function, is not
 // something a job should discover at 8am.
 async function dryImport(root: string, manifest: PackageManifest) {
-  const exportNames = Object.keys(manifest.exports);
+  const targets = checkTargets(manifest);
   const extraImports: Record<string, string> = {};
   const lines: Array<string> = [];
-  exportNames.forEach((exportName, index) => {
+  targets.forEach(({ target }, index) => {
     const specifier = `kody:staged/${index}`;
-    extraImports[specifier] = join(root, manifest.exports[exportName] ?? "");
+    extraImports[specifier] = join(root, target);
     lines.push(`import candidate${index} from '${specifier}'`);
   });
-  const body = exportNames
+  const body = targets
     .map(
-      (exportName, index) =>
-        `  kinds[${JSON.stringify(exportName)}] = typeof candidate${index}`,
+      ({ label }, index) =>
+        `  kinds[${JSON.stringify(label)}] = typeof candidate${index}`,
     )
     .join("\n");
   const outcome = await execute({
@@ -230,8 +245,7 @@ ${body}
   return Object.entries(kinds)
     .filter(([, kind]) => kind !== "function")
     .map(
-      ([exportName, kind]) =>
-        `Export "${exportName}" default-exports a ${kind}, not a function`,
+      ([label, kind]) => `"${label}" default-exports a ${kind}, not a function`,
     );
 }
 

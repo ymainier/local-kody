@@ -46,29 +46,24 @@ const api = createServer((request, response) => {
     response.statusCode = 401;
     return response.end(JSON.stringify({ message: "Bad credentials" }));
   }
-  response.end(
-    JSON.stringify([
-      {
-        id: "3",
-        type: "ReleaseEvent",
-        repo: { name: "kody-bot/tool" },
-        payload: { action: "published" },
-      },
-      {
-        id: "2",
-        type: "PushEvent",
-        repo: { name: "kody-bot/tool" },
-        payload: {},
-      },
-      {
-        id: "1",
-        type: "CreateEvent",
-        repo: { name: "kody-bot/new" },
-        payload: { ref_type: "repository" },
-      },
-    ]),
-  );
+  response.end(JSON.stringify(events));
 });
+
+const events: Array<Record<string, unknown>> = [
+  {
+    id: "3",
+    type: "ReleaseEvent",
+    repo: { name: "kody-bot/tool" },
+    payload: { action: "published" },
+  },
+  { id: "2", type: "PushEvent", repo: { name: "kody-bot/tool" }, payload: {} },
+  {
+    id: "1",
+    type: "CreateEvent",
+    repo: { name: "kody-bot/new" },
+    payload: { ref_type: "repository" },
+  },
+];
 await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
 const apiUrl = `http://127.0.0.1:${(api.address() as { port: number }).port}`;
 
@@ -125,6 +120,8 @@ const childEnv = {
   KODY_HOME: kodyHome,
   KODY_SOCKET: socketFile,
   KODY_NPM_REGISTRY: `${apiUrl}/npm`,
+  // Keep the suite out of Notification Center.
+  KODY_NOTIFY: "stderr",
 };
 
 const daemon = spawn(
@@ -144,6 +141,25 @@ function ping() {
     probe.on("error", () => resolve(false));
     probe.end("{}");
   });
+}
+
+function daemonPost(path: string, body: unknown) {
+  return new Promise<{ result?: unknown; error?: string }>(
+    (resolve, reject) => {
+      const outgoing = httpRequest(
+        { socketPath: socketFile, path, method: "POST" },
+        (response) => {
+          const chunks: Array<Buffer> = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () =>
+            resolve(JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}")),
+          );
+        },
+      );
+      outgoing.on("error", reject);
+      outgoing.end(JSON.stringify(body ?? {}));
+    },
+  );
 }
 
 const readyBy = Date.now() + 10_000;
@@ -537,6 +553,142 @@ export default async function main(params) { return await kody.runGet(params) }`
   assert.equal(record.status, "error");
   assert.equal(record.error, "interrupted");
   return `${record.status}: ${record.error ?? ""}`;
+});
+
+type JobView = {
+  jobName: string;
+  enabled: boolean;
+  expression: string;
+  nextRun: string | null;
+  lastRun: { status: string } | null;
+};
+type JobRunResult = {
+  runId: string;
+  result: { notified: boolean; message: string } | null;
+  error: string | null;
+};
+type DigestResult = { notified: boolean; message: string };
+
+const callCapability = `import { kody } from 'kody:runtime'
+export default async function main({ name, input }) { return await kody[name](input) }`;
+
+await step("a package can declare a daily job, disabled to start", async () => {
+  const saved = await run(savePackage, {
+    name: "@me/daily-shipped",
+    description: "Tells me each morning what kody-bot shipped",
+    files: {
+      "what-shipped.ts": whatShippedSource,
+      "digest.ts": `import { kody } from 'kody:runtime'
+import whatShipped from './what-shipped.ts'
+export default async function digest() {
+  const found = await whatShipped({ baseUrl: ${JSON.stringify(apiUrl)}, login: 'kody-bot' })
+  if (found.shipped.length === 0) return { notified: false, message: found.message }
+  await kody.notifySelf({ title: 'kody-bot shipped', message: found.message })
+  return { notified: true, message: found.message }
+}`,
+    },
+    exports: { "./whatShipped": "./what-shipped.ts" },
+    kody: {
+      jobs: {
+        "daily-digest": {
+          entry: "./digest.ts",
+          schedule: { type: "cron", expression: "0 8 * * *" },
+          timezone: "UTC",
+        },
+      },
+    },
+  });
+  assert.equal(saved.error, undefined, saved.error ?? "");
+  const listed = await run(callCapability, { name: "jobList", input: {} });
+  const job = (listed.result as Array<JobView>).find(
+    (candidate) => candidate.jobName === "daily-digest",
+  );
+  assert.ok(job, "daily-digest not listed");
+  assert.equal(job.enabled, false);
+  assert.equal(job.nextRun, null);
+  return `${job.jobName} on "${job.expression}", disabled`;
+});
+
+await step("a job must run by hand before it can be enabled", async () => {
+  const refused = await run(callCapability, {
+    name: "jobUpdate",
+    input: {
+      packageName: "@me/daily-shipped",
+      jobName: "daily-digest",
+      enabled: true,
+    },
+  });
+  assert.match(refused.error ?? "", /never run successfully/);
+  const ranNow = await run(callCapability, {
+    name: "jobRunNow",
+    input: { packageName: "@me/daily-shipped", jobName: "daily-digest" },
+  });
+  const outcome = ranNow.result as JobRunResult;
+  assert.equal(outcome.error, null, outcome.error ?? "");
+  assert.deepEqual(outcome.result, { notified: true, message: "2 new" });
+  const enabled = await run(callCapability, {
+    name: "jobUpdate",
+    input: {
+      packageName: "@me/daily-shipped",
+      jobName: "daily-digest",
+      enabled: true,
+    },
+  });
+  assert.equal((enabled.result as JobView).enabled, true);
+  assert.ok((enabled.result as JobView).nextRun, "no next run computed");
+  return `ran by hand, then enabled for ${String((enabled.result as JobView).nextRun)}`;
+});
+
+await step("a scheduler tick runs the job and stays quiet", async () => {
+  const tick = await daemonPost("/scheduler/tick", {
+    now: new Date(Date.now() + 26 * 3600_000).toISOString(),
+  });
+  const ran = (tick.result as { ran: Array<{ jobName: string }> }).ran;
+  assert.equal(ran.length, 1, `ran ${ran.length} times`);
+  const listed = await run(callCapability, {
+    name: "runList",
+    input: { packageName: "@me/daily-shipped", jobName: "daily-digest" },
+  });
+  const latest = (listed.result as Array<RunSummary>)[0];
+  const detail = await run(callCapability, {
+    name: "runGet",
+    input: { id: latest?.id },
+  });
+  assert.deepEqual((detail.result as { result: DigestResult }).result, {
+    notified: false,
+    message: "nothing new",
+  });
+  return "one run, nothing new, no notification";
+});
+
+await step("a tick notifies once the fake API has a new release", async () => {
+  events.unshift({
+    id: "4",
+    type: "ReleaseEvent",
+    repo: { name: "kody-bot/tool" },
+    payload: { action: "published" },
+  });
+  const tick = await daemonPost("/scheduler/tick", {
+    now: new Date(Date.now() + 50 * 3600_000).toISOString(),
+  });
+  assert.equal(
+    (tick.result as { ran: Array<unknown> }).ran.length,
+    1,
+    "expected exactly one catch-up run",
+  );
+  const listed = await run(callCapability, {
+    name: "runList",
+    input: { packageName: "@me/daily-shipped", jobName: "daily-digest" },
+  });
+  const latest = (listed.result as Array<RunSummary>)[0];
+  const detail = await run(callCapability, {
+    name: "runGet",
+    input: { id: latest?.id },
+  });
+  const digest = (detail.result as { result: DigestResult }).result;
+  assert.equal(digest.notified, true);
+  assert.equal(digest.message, "1 new");
+  return `notified: ${digest.message}`;
 });
 
 await step("two proxies share one daemon concurrently", async () => {

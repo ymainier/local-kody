@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { listJobs, runJobOnce, updateJob } from "./jobs.ts";
 import { listPackages, packageKodySchema } from "./packages.ts";
 import { savePackage } from "./publish.ts";
 import { defineCapability } from "./registry.ts";
@@ -28,9 +29,9 @@ defineCapability({
     message: z.string().min(1).describe("Body text"),
   }),
   async handler({ title, message }) {
-    if (process.platform !== "darwin") {
+    if (process.platform !== "darwin" || process.env.KODY_NOTIFY === "stderr") {
       process.stderr.write(`[notifySelf] ${title}: ${message}\n`);
-      return { delivered: false, reason: "Notifications need macOS" };
+      return { delivered: false, reason: "No Notification Center here" };
     }
     // argv keeps user text out of the AppleScript source.
     await execFileAsync("osascript", [
@@ -136,5 +137,70 @@ defineCapability({
   inputSchema: z.object({ id: z.string().min(1) }),
   async handler({ id }) {
     return getRun(id);
+  },
+});
+
+defineCapability({
+  name: "jobList",
+  domain: "jobs",
+  description:
+    "List the jobs saved packages declare, with their schedule, whether they are enabled, when they run next and how the last run went.",
+  keywords: ["job", "schedule", "cron", "daily", "recurring", "automation"],
+  inputSchema: z.object({}),
+  async handler() {
+    return listJobs();
+  },
+});
+
+defineCapability({
+  name: "jobRunNow",
+  domain: "jobs",
+  description:
+    "Run one declared job immediately and record it. A job must succeed here at least once before it can be enabled.",
+  keywords: ["job", "run", "now", "test", "try", "trigger"],
+  destructive: true,
+  inputSchema: z.object({
+    packageName: z.string().describe("@scope/leaf"),
+    jobName: z.string(),
+  }),
+  async handler({ packageName, jobName }) {
+    const outcome = await runJobOnce(packageName, jobName);
+    return {
+      runId: outcome.runId,
+      result: outcome.result ?? null,
+      error: outcome.error ?? null,
+      logs: outcome.logs,
+      durationMs: outcome.durationMs,
+    };
+  },
+});
+
+defineCapability({
+  name: "jobUpdate",
+  domain: "jobs",
+  description:
+    "Turn a job on or off, or override its cron expression and timezone. The job's name and entry stay in the package; this only changes when it runs.",
+  keywords: [
+    "job",
+    "enable",
+    "disable",
+    "schedule",
+    "cron",
+    "timezone",
+    "pause",
+  ],
+  destructive: true,
+  inputSchema: z.object({
+    packageName: z.string().describe("@scope/leaf"),
+    jobName: z.string(),
+    enabled: z.boolean().optional(),
+    expression: z
+      .string()
+      .optional()
+      .describe('Five cron fields, e.g. "0 8 * * *"'),
+    timezone: z.string().optional().describe('IANA name, e.g. "Europe/London"'),
+  }),
+  async handler(input) {
+    return updateJob(input);
   },
 });

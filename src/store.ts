@@ -29,6 +29,16 @@ const migrations: Array<string> = [
    create unique index runs_idempotency_key
      on runs (idempotency_key) where idempotency_key is not null;
    create index runs_started_at on runs (started_at desc);`,
+  `create table jobs (
+     package_name text not null,
+     job_name text not null,
+     enabled integer not null default 0,
+     expression text,
+     timezone text,
+     enabled_at text,
+     last_scheduled_for text,
+     primary key (package_name, job_name)
+   )`,
 ];
 
 let database: DatabaseSync | null = null;
@@ -270,4 +280,99 @@ export function reconcileStrandedRuns(staleBefore: string) {
     )
     .run(new Date().toISOString(), staleBefore);
   return { reconciled: Number(info.changes) };
+}
+
+// Schedule state only. A job's name and entry live in the package manifest,
+// which stays the source of truth for what the job is.
+export type JobState = {
+  packageName: string;
+  jobName: string;
+  enabled: boolean;
+  expression: string | null;
+  timezone: string | null;
+  enabledAt: string | null;
+  lastScheduledFor: string | null;
+};
+
+type JobRow = {
+  package_name: string;
+  job_name: string;
+  enabled: number;
+  expression: string | null;
+  timezone: string | null;
+  enabled_at: string | null;
+  last_scheduled_for: string | null;
+};
+
+function toJobState(row: JobRow): JobState {
+  return {
+    packageName: row.package_name,
+    jobName: row.job_name,
+    enabled: row.enabled === 1,
+    expression: row.expression,
+    timezone: row.timezone,
+    enabledAt: row.enabled_at,
+    lastScheduledFor: row.last_scheduled_for,
+  };
+}
+
+export function getJobState(packageName: string, jobName: string) {
+  const row = getDatabase()
+    .prepare("select * from jobs where package_name = ? and job_name = ?")
+    .get(packageName, jobName) as JobRow | undefined;
+  return row ? toJobState(row) : null;
+}
+
+export function saveJobState(state: JobState) {
+  getDatabase()
+    .prepare(
+      `insert into jobs (package_name, job_name, enabled, expression, timezone, enabled_at, last_scheduled_for)
+       values (?, ?, ?, ?, ?, ?, ?)
+       on conflict (package_name, job_name) do update set
+         enabled = excluded.enabled,
+         expression = excluded.expression,
+         timezone = excluded.timezone,
+         enabled_at = excluded.enabled_at,
+         last_scheduled_for = excluded.last_scheduled_for`,
+    )
+    .run(
+      state.packageName,
+      state.jobName,
+      state.enabled ? 1 : 0,
+      state.expression,
+      state.timezone,
+      state.enabledAt,
+      state.lastScheduledFor,
+    );
+  return state;
+}
+
+export function setLastScheduledFor(
+  packageName: string,
+  jobName: string,
+  when: string,
+) {
+  getDatabase()
+    .prepare(
+      "update jobs set last_scheduled_for = ? where package_name = ? and job_name = ?",
+    )
+    .run(when, packageName, jobName);
+}
+
+export function lastRunOf(packageName: string, jobName: string) {
+  const row = getDatabase()
+    .prepare(
+      "select * from runs where package_name = ? and job_name = ? order by started_at desc limit 1",
+    )
+    .get(packageName, jobName) as RunRow | undefined;
+  return row ? toRunRecord(row) : null;
+}
+
+export function hasSuccessfulRun(packageName: string, jobName: string) {
+  const row = getDatabase()
+    .prepare(
+      "select id from runs where package_name = ? and job_name = ? and status = 'success' limit 1",
+    )
+    .get(packageName, jobName);
+  return row !== undefined;
 }
