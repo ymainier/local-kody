@@ -1,12 +1,11 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { storageOwnerFor } from "./package-storage.ts";
 import { listPackages, savePackage } from "./packages.ts";
-import { storageDir } from "./paths.ts";
 import { defineCapability } from "./registry.ts";
 import { listSecretNames } from "./secrets.ts";
+import { storageGet, storageSet } from "./store.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -91,8 +90,9 @@ defineCapability({
   },
 });
 
-// MVP storage: one JSON file per namespace. Kody stamps each module with its
-// package id so code can only reach its own bucket; that comes later.
+// Storage lives in SQLite, one bucket per owner. `namespace` still names the
+// bucket here; step 3 replaces it with a package identity taken from the
+// importing module rather than from an argument.
 const storageInput = z.object({
   namespace: z
     .string()
@@ -100,13 +100,6 @@ const storageInput = z.object({
     .describe("Usually the package leaf"),
   key: z.string().min(1),
 });
-
-function readNamespace(namespace: string): Record<string, unknown> {
-  const file = join(storageDir, `${namespace}.json`);
-  return existsSync(file)
-    ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>)
-    : {};
-}
 
 defineCapability({
   name: "storageGet",
@@ -116,7 +109,7 @@ defineCapability({
   keywords: ["storage", "state", "cursor", "remember", "read", "get"],
   inputSchema: storageInput,
   async handler({ namespace, key }) {
-    return readNamespace(namespace)[key] ?? null;
+    return storageGet(storageOwnerFor(namespace), key);
   },
 });
 
@@ -128,12 +121,6 @@ defineCapability({
   keywords: ["storage", "state", "cursor", "remember", "write", "set", "save"],
   inputSchema: storageInput.extend({ value: z.unknown() }),
   async handler({ namespace, key, value }) {
-    const data = readNamespace(namespace);
-    data[key] = value;
-    writeFileSync(
-      join(storageDir, `${namespace}.json`),
-      JSON.stringify(data, null, 2),
-    );
-    return { saved: true };
+    return storageSet(storageOwnerFor(namespace), key, value);
   },
 });

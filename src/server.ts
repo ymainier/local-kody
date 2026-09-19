@@ -3,9 +3,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import "./capabilities.ts";
 import { execute } from "./executor.ts";
+import { importLegacyStorage } from "./package-storage.ts";
 import { search, searchInputSchema } from "./search.ts";
 
 // stdout is the MCP channel: never write logs there. Use stderr.
+importLegacyStorage();
+
 const instructions = `local-kody gives you a durable home: saved code (packages), secrets you can use but never read, and small state.
 Two tools only:
 1. search: find capabilities, saved packages, guides and secret names. Call it first. Open an entity ref to get its input type and a ready-to-run module.

@@ -16,7 +16,7 @@ Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare
 
 ```bash
 npm install
-npm test          # 10 end-to-end checks, driving the server over MCP stdio
+npm test          # end-to-end checks, driving the server over MCP stdio
 ```
 
 Secrets are set by you, never by the agent:
@@ -27,7 +27,7 @@ npm run secret -- allow githubToken uploads.github.com
 npm run secret -- list
 ```
 
-State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `storage/`, `secrets.json` (mode 0600).
+State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `kody.db` (SQLite), `secrets.json` (mode 0600).
 
 ## Claude Desktop
 
@@ -66,4 +66,5 @@ State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `storag
 | `src/gateway.ts`      | The sandbox's only reachable address: `/call`, `/fetch`, `/log`, `/settle`           |
 | `src/secrets.ts`      | Secret store and `{{secret:name}}` substitution per approved host                    |
 | `src/packages.ts`     | Saved packages and `kody:@scope/leaf/export` resolution                              |
+| `src/store.ts`        | SQLite store: versioned migrations and package storage                               |
 | `guides/*.md`         | Docs for the agent, found through search                                             |

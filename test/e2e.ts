@@ -1,6 +1,6 @@
 // Drives the MCP server over stdio exactly as Claude Desktop would.
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,6 +56,13 @@ writeFileSync(
   JSON.stringify({
     githubToken: { value: "gh-test-token", allowedHosts: ["127.0.0.1"] },
   }),
+);
+
+// A phase 1 storage file the server should import into SQLite on first start.
+mkdirSync(join(kodyHome, "storage"), { recursive: true });
+writeFileSync(
+  join(kodyHome, "storage", "legacy-notes.json"),
+  JSON.stringify({ greeting: "from the json era" }),
 );
 
 const client = new Client({ name: "e2e", version: "0.0.0" });
@@ -208,6 +215,32 @@ export default async function main(params) { return await whatShipped(params) }`
   ]);
   assert.equal((second.result as { message: string }).message, "nothing new");
   return `1st: ${JSON.stringify(first.result)} / 2nd: ${JSON.stringify(second.result)}`;
+});
+
+await step("storage written by one execute is read by the next", async () => {
+  const write = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.storageSet(params) }`,
+    { namespace: "handoff", key: "cursor", value: { page: 7 } },
+  );
+  assert.equal(write.error, undefined, write.error ?? "");
+  const read = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.storageGet(params) }`,
+    { namespace: "handoff", key: "cursor" },
+  );
+  assert.deepEqual(read.result, { page: 7 });
+  return JSON.stringify(read.result);
+});
+
+await step("phase 1 storage json is imported into SQLite", async () => {
+  const outcome = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.storageGet(params) }`,
+    { namespace: "legacy-notes", key: "greeting" },
+  );
+  assert.equal(outcome.result, "from the json era");
+  return String(outcome.result);
 });
 
 await step("secret refused for a host it is not approved for", async () => {
