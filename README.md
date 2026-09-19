@@ -36,12 +36,12 @@ State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `storag
 
 ```json
 {
-	"mcpServers": {
-		"local-kody": {
-			"command": "/absolute/path/to/node",
-			"args": ["/Users/<you>/src/local-kody/src/server.ts"]
-		}
-	}
+  "mcpServers": {
+    "local-kody": {
+      "command": "/absolute/path/to/node",
+      "args": ["/Users/<you>/src/local-kody/src/server.ts"]
+    }
+  }
 }
 ```
 
@@ -56,14 +56,14 @@ State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `storag
 
 ## Layout
 
-| File | Role |
-| --- | --- |
-| `src/server.ts` | MCP stdio server: `search`, `execute`, server instructions |
-| `src/registry.ts` | `defineCapability`, Zod-validated host functions |
+| File                  | Role                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `src/server.ts`       | MCP stdio server: `search`, `execute`, server instructions                           |
+| `src/registry.ts`     | `defineCapability`, Zod-validated host functions                                     |
 | `src/capabilities.ts` | `notifySelf`, `secretList`, `packageSave`, `packageList`, `storageGet`, `storageSet` |
-| `src/search.ts` | Lexical ranking, domain index, entity detail with ready-to-run modules |
-| `src/executor.ts` | Import scanning, import map, `deno run` with locked permissions |
-| `src/gateway.ts` | The sandbox's only reachable address: `/call`, `/fetch`, `/log`, `/settle` |
-| `src/secrets.ts` | Secret store and `{{secret:name}}` substitution per approved host |
-| `src/packages.ts` | Saved packages and `kody:@scope/leaf/export` resolution |
-| `guides/*.md` | Docs for the agent, found through search |
+| `src/search.ts`       | Lexical ranking, domain index, entity detail with ready-to-run modules               |
+| `src/executor.ts`     | Import scanning, import map, `deno run` with locked permissions                      |
+| `src/gateway.ts`      | The sandbox's only reachable address: `/call`, `/fetch`, `/log`, `/settle`           |
+| `src/secrets.ts`      | Secret store and `{{secret:name}}` substitution per approved host                    |
+| `src/packages.ts`     | Saved packages and `kody:@scope/leaf/export` resolution                              |
+| `guides/*.md`         | Docs for the agent, found through search                                             |

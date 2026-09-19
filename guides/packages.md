@@ -12,10 +12,10 @@ Save code as a package when the user will ask the same thing again, or wants it 
 ## Save it
 
 ```ts
-import { kody } from 'kody:runtime'
+import { kody } from "kody:runtime";
 
 export default async function main(params) {
-	return await kody.packageSave(params)
+  return await kody.packageSave(params);
 }
 ```
 
@@ -23,20 +23,22 @@ with params like:
 
 ```json
 {
-	"name": "@me/what-shipped",
-	"description": "Releases and new repos a GitHub user shipped since last check",
-	"files": { "what-shipped.ts": "export default async function whatShipped(input) { ... }" },
-	"exports": { "./whatShipped": "./what-shipped.ts" }
+  "name": "@me/what-shipped",
+  "description": "Releases and new repos a GitHub user shipped since last check",
+  "files": {
+    "what-shipped.ts": "export default async function whatShipped(input) { ... }"
+  },
+  "exports": { "./whatShipped": "./what-shipped.ts" }
 }
 ```
 
 ## Use it
 
 ```ts
-import whatShipped from 'kody:@me/what-shipped/whatShipped'
+import whatShipped from "kody:@me/what-shipped/whatShipped";
 
 export default async function main(params) {
-	return await whatShipped(params)
+  return await whatShipped(params);
 }
 ```
 
