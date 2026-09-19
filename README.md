@@ -5,6 +5,8 @@ A local, single-user take on [kentcdodds/kody](https://github.com/kentcdodds/kod
 - `search` finds capabilities, saved packages, guides and secret names.
 - `execute` runs one TypeScript module in a Deno sandbox. The sandbox has no filesystem, no env, no subprocesses, and network access to one local gateway port only.
 
+The MCP server you point a client at is a thin proxy. All the work happens in a background daemon that owns the SQLite store, the gateway and the sandbox, so it outlives the app and several clients can share one copy of the state.
+
 Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare name, imports saved packages as `kody:@me/<leaf>/<export>`, and writes `{{secret:name}}` wherever a credential goes. The gateway swaps in the real value, and only for hosts you approved.
 
 ## Requirements
@@ -16,8 +18,11 @@ Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare
 
 ```bash
 npm install
-npm test          # end-to-end checks, driving the server over MCP stdio
+npm test               # end-to-end checks, driving the proxy over MCP stdio
+npm run daemon:install # launchd agent: starts at login, restarts on crash
 ```
+
+`npm run daemon` runs the daemon in the foreground instead; `npm run daemon:logs` tails its log and `npm run daemon:uninstall` removes the agent.
 
 Secrets are set by you, never by the agent:
 
@@ -27,7 +32,7 @@ npm run secret -- allow githubToken uploads.github.com
 npm run secret -- list
 ```
 
-State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `kody.db` (SQLite), `secrets.json` (mode 0600).
+State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `kody.db` (SQLite), `secrets.json` (mode 0600), `daemon.sock` (mode 0600, override with `KODY_SOCKET`) and `logs/`.
 
 ## Claude Desktop
 
@@ -45,7 +50,7 @@ State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `kody.d
 }
 ```
 
-3. Quit Claude Desktop fully (Cmd+Q) and reopen it. `local-kody` should appear with two tools.
+3. Quit Claude Desktop fully (Cmd+Q) and reopen it. `local-kody` should appear with two tools. The daemon keeps running while the app is closed.
 4. If it doesn't, read `~/Library/Logs/Claude/mcp-server-local-kody.log`.
 
 ## First prompts to try
@@ -58,7 +63,10 @@ State lives in `~/.local-kody` (override with `KODY_HOME`): `packages/`, `kody.d
 
 | File                  | Role                                                                                 |
 | --------------------- | ------------------------------------------------------------------------------------ |
-| `src/server.ts`       | MCP stdio server: `search`, `execute`, server instructions                           |
+| `src/server.ts`       | MCP stdio proxy: forwards `search` and `execute` to the daemon socket                |
+| `src/daemon.ts`       | Long-lived host: store, gateway, executor, search over a Unix socket                 |
+| `src/tools.ts`        | The two tool schemas and the server instructions, shared by both                     |
+| `src/launchd.ts`      | `daemon:install` / `daemon:uninstall` / `daemon:logs`                                |
 | `src/registry.ts`     | `defineCapability`, Zod-validated host functions                                     |
 | `src/capabilities.ts` | `notifySelf`, `secretList`, `packageSave`, `packageList`, `storageGet`, `storageSet` |
 | `src/search.ts`       | Lexical ranking, domain index, entity detail with ready-to-run modules               |

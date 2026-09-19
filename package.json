@@ -9,6 +9,10 @@
   },
   "scripts": {
     "start": "node src/server.ts",
+    "daemon": "node src/daemon.ts",
+    "daemon:install": "node src/launchd.ts install",
+    "daemon:uninstall": "node src/launchd.ts uninstall",
+    "daemon:logs": "node src/launchd.ts logs",
     "secret": "node src/cli.ts",
     "test": "node test/e2e.ts",
     "typecheck": "tsc --noEmit",

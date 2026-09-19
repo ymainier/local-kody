@@ -10,19 +10,7 @@ import {
   type Capability,
 } from "./registry.ts";
 import { listSecretNames } from "./secrets.ts";
-
-export const searchInputSchema = z.object({
-  query: z.string().optional().describe("What you want to do, in plain words"),
-  domain: z.string().optional().describe('Limit to one domain, e.g. "notify"'),
-  entity: z
-    .union([z.string(), z.array(z.string()).max(10)])
-    .optional()
-    .describe(
-      'Open refs such as "capability:notifySelf", "package:@me/x", "guide:packages"',
-    ),
-});
-
-export type SearchInput = z.infer<typeof searchInputSchema>;
+import type { SearchInput } from "./tools.ts";
 
 type SearchEntry = {
   ref: string;

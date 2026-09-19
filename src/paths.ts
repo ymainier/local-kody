@@ -10,11 +10,15 @@ export const packagesDir = join(kodyHome, "packages");
 export const storageDir = join(kodyHome, "storage");
 export const secretsFile = join(kodyHome, "secrets.json");
 export const dbFile = process.env.KODY_DB ?? join(kodyHome, "kody.db");
+export const socketFile =
+  process.env.KODY_SOCKET ?? join(kodyHome, "daemon.sock");
+export const logsDir = join(kodyHome, "logs");
+export const daemonLogFile = join(logsDir, "daemon.log");
 export const guidesDir = join(projectRoot, "guides");
 export const denoBin =
   process.env.KODY_DENO_BIN ??
   join(projectRoot, "node_modules", ".bin", "deno");
 
-for (const directory of [kodyHome, packagesDir]) {
+for (const directory of [kodyHome, packagesDir, logsDir]) {
   mkdirSync(directory, { recursive: true });
 }

@@ -1,7 +1,10 @@
-// Drives the MCP server over stdio exactly as Claude Desktop would.
+// Drives the MCP proxy over stdio exactly as Claude Desktop would, against a
+// daemon started here on a temp home and socket.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -65,18 +68,63 @@ writeFileSync(
   JSON.stringify({ greeting: "from the json era" }),
 );
 
-const client = new Client({ name: "e2e", version: "0.0.0" });
-await client.connect(
-  new StdioClientTransport({
-    command: process.execPath,
-    args: [join(import.meta.dirname, "..", "src", "server.ts")],
-    env: { ...(process.env as Record<string, string>), KODY_HOME: kodyHome },
-    stderr: "ignore",
-  }),
-);
+// A Unix socket path has about 100 characters to play with, so it goes
+// straight under /tmp rather than inside the (long) temp home.
+const socketFile = join("/tmp", `kody-e2e-${randomUUID().slice(0, 8)}.sock`);
+const childEnv = {
+  ...(process.env as Record<string, string>),
+  KODY_HOME: kodyHome,
+  KODY_SOCKET: socketFile,
+};
 
-async function callText(name: string, args: Record<string, unknown>) {
-  const response = (await client.callTool({
+const daemon = spawn(
+  process.execPath,
+  [join(import.meta.dirname, "..", "src", "daemon.ts")],
+  { env: childEnv, stdio: ["ignore", "ignore", "pipe"] },
+);
+let daemonStderr = "";
+daemon.stderr.on("data", (chunk: Buffer) => (daemonStderr += chunk.toString()));
+
+function ping() {
+  return new Promise<boolean>((resolve) => {
+    const probe = httpRequest(
+      { socketPath: socketFile, path: "/health", method: "POST" },
+      () => resolve(true),
+    );
+    probe.on("error", () => resolve(false));
+    probe.end("{}");
+  });
+}
+
+const readyBy = Date.now() + 10_000;
+while (!(await ping())) {
+  if (Date.now() > readyBy) {
+    throw new Error(`Daemon never came up. stderr:\n${daemonStderr}`);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
+async function connectClient(name: string) {
+  const client = new Client({ name, version: "0.0.0" });
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [join(import.meta.dirname, "..", "src", "server.ts")],
+      env: childEnv,
+      stderr: "ignore",
+    }),
+  );
+  return client;
+}
+
+const client = await connectClient("e2e");
+
+async function callTextOn(
+  target: Client,
+  name: string,
+  args: Record<string, unknown>,
+) {
+  const response = (await target.callTool({
     name,
     arguments: args,
   })) as ToolText;
@@ -84,6 +132,10 @@ async function callText(name: string, args: Record<string, unknown>) {
     text: response.content[0]?.text ?? "",
     isError: response.isError === true,
   };
+}
+
+async function callText(name: string, args: Record<string, unknown>) {
+  return await callTextOn(client, name, args);
 }
 
 async function run(code: string, params: Record<string, unknown> = {}) {
@@ -276,7 +328,46 @@ await step(
   },
 );
 
+await step("two proxies share one daemon concurrently", async () => {
+  const second = await connectClient("e2e-second");
+  const code = `import { kody } from 'kody:runtime'
+export default async function main(params) {
+  await kody.storageSet({ namespace: 'concurrent', key: params.key, value: params.key })
+  return await kody.storageGet({ namespace: 'concurrent', key: params.key })
+}`;
+  const [first, other, index] = await Promise.all([
+    callTextOn(client, "execute", { code, params: { key: "one" } }),
+    callTextOn(second, "execute", { code, params: { key: "two" } }),
+    callTextOn(second, "search", {}),
+  ]);
+  await second.close();
+  assert.equal((JSON.parse(first.text) as ExecuteResult).result, "one");
+  assert.equal((JSON.parse(other.text) as ExecuteResult).result, "two");
+  assert.match(index.text, /# Domains/);
+  return "both proxies got their own result";
+});
+
+await step("a proxy with no daemon says how to start one", async () => {
+  const orphan = new Client({ name: "e2e-orphan", version: "0.0.0" });
+  await orphan.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [join(import.meta.dirname, "..", "src", "server.ts")],
+      env: { ...childEnv, KODY_SOCKET: join("/tmp", "kody-e2e-absent.sock") },
+      stderr: "ignore",
+    }),
+  );
+  const { text, isError } = await callTextOn(orphan, "search", {});
+  await orphan.close();
+  assert.equal(isError, true);
+  assert.match(text, /daemon is not running/);
+  assert.match(text, /npm run daemon:install/);
+  return text.split("\n")[0] ?? "";
+});
+
 await client.close();
+daemon.kill("SIGTERM");
+rmSync(socketFile, { force: true });
 api.close();
 console.table(report);
 process.exitCode = report.every((entry) => entry.ok) ? 0 : 1;
