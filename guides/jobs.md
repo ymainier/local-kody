@@ -20,7 +20,7 @@ Jobs live in the manifest, alongside `exports`, and go in with `kody.packageSave
 }
 ```
 
-The entry is a package-local module — it does not have to be one of the exports — whose default export takes no arguments. The usual shape is a thin wrapper around a callable export that stays quiet unless there is something to say:
+The entry is a package-local module whose default export takes no arguments. It does not have to be one of the exports. The usual shape is a thin wrapper around a callable export that stays quiet unless there is something to say:
 
 ```ts
 import { kody } from "kody:runtime";
@@ -46,4 +46,4 @@ Jobs arrive disabled, and a job that has never run cannot be enabled: a schedule
 
 ## What the schedule promises
 
-Every 30 seconds the daemon looks at each enabled job and runs it if an occurrence has passed. Occurrences missed because the Mac slept or the daemon was down **coalesce into a single run** — three missed mornings are one catch-up, not three. A run that fails sends a notification naming the job and the first line of the error.
+Every 30 seconds the daemon looks at each enabled job and runs it if an occurrence has passed. Occurrences missed because the Mac slept or the daemon was down coalesce into a single run. Three missed mornings are one catch-up, not three. A run that fails sends a notification naming the job and the first line of the error.

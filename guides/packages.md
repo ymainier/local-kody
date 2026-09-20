@@ -26,11 +26,23 @@ with params like:
   "name": "@me/what-shipped",
   "description": "Releases and new repos a GitHub user shipped since last check",
   "files": {
-    "what-shipped.ts": "export default async function whatShipped(input) { ... }"
+    "what-shipped.ts": "export default async function whatShipped(input) { ... }",
+    "daily-digest.ts": "export default async function dailyDigest() { ... }"
   },
-  "exports": { "./whatShipped": "./what-shipped.ts" }
+  "exports": { "./whatShipped": "./what-shipped.ts" },
+  "kody": {
+    "jobs": {
+      "daily-digest": {
+        "entry": "./daily-digest.ts",
+        "schedule": { "type": "cron", "expression": "0 8 * * *" },
+        "timezone": "Europe/London"
+      }
+    }
+  }
 }
 ```
+
+`kody.jobs` is optional and declares schedules the daemon runs without a model. Read guide:jobs before adding one. `dependencies` is optional too: pass exact npm versions to pin, and anything you leave out is resolved to the latest at save time.
 
 ## Use it
 
@@ -42,15 +54,15 @@ export default async function main(params) {
 }
 ```
 
-Test the module with execute before saving, then invoke the saved export once to prove it works.
+Test the module with execute before saving, then invoke the saved export once to prove it works. Reading a saved package back is `kody.packageList()`, or `search` with `{ "entity": "package:@me/<leaf>" }`.
 
 ## What a save checks
 
 `files` is the whole package: what you send replaces what was there. Before anything is swapped into place, the save
 
-- confirms every `exports` entry (and every job entry) points at a file you sent,
+- confirms every `exports` entry and every job entry points at a file you sent, and that `kody.jobs` parses,
 - pins each bare npm import to an exact version in `package.json#dependencies`, keeping versions already pinned,
-- runs `deno check` over every export, and
-- imports every export in the sandbox without calling it, so a module that throws on load is caught here.
+- runs `deno check` over every export and job entry, and
+- imports each of them in the sandbox without calling it, so a module that throws while loading is caught here instead of at 8am.
 
 If any check fails nothing is written, the previous version keeps running, and the error lists every failure at once.
