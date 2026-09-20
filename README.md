@@ -109,6 +109,8 @@ Capabilities are host functions the sandbox reaches as `kody.<name>(input)`. The
 
 The guides in `guides/` are written for the agent and come back through `search`: `guide:packages` for saving code, `guide:storage` for state, `guide:jobs` for schedules.
 
+For how the machine itself works, read [docs/how-it-works.md](docs/how-it-works.md).
+
 ## Runs and recovering from a timeout
 
 Every job run is recorded. An `execute` is recorded when it fails, and when the caller passes an `idempotencyKey`:
