@@ -39,6 +39,11 @@ const migrations: Array<string> = [
      last_scheduled_for text,
      primary key (package_name, job_name)
    )`,
+  `create table secrets (
+     name text primary key,
+     allowed_hosts text not null,
+     created_at text not null
+   )`,
 ];
 
 let database: DatabaseSync | null = null;
@@ -375,4 +380,58 @@ export function hasSuccessfulRun(packageName: string, jobName: string) {
     )
     .get(packageName, jobName);
   return row !== undefined;
+}
+
+// Secret metadata only. The value lives in the Keychain (src/keychain.ts), so
+// listing secrets and building the search index never touch it.
+export type SecretMeta = {
+  name: string;
+  allowedHosts: Array<string>;
+  createdAt: string;
+};
+
+type SecretRow = {
+  name: string;
+  allowed_hosts: string;
+  created_at: string;
+};
+
+function toSecretMeta(row: SecretRow): SecretMeta {
+  return {
+    name: row.name,
+    allowedHosts: JSON.parse(row.allowed_hosts) as Array<string>,
+    createdAt: row.created_at,
+  };
+}
+
+export function listSecretMeta() {
+  const rows = getDatabase()
+    .prepare("select * from secrets order by name")
+    .all() as Array<SecretRow>;
+  return rows.map(toSecretMeta);
+}
+
+export function getSecretMeta(name: string) {
+  const row = getDatabase()
+    .prepare("select * from secrets where name = ?")
+    .get(name) as SecretRow | undefined;
+  return row ? toSecretMeta(row) : null;
+}
+
+export function saveSecretMeta(name: string, allowedHosts: Array<string>) {
+  getDatabase()
+    .prepare(
+      `insert into secrets (name, allowed_hosts, created_at)
+       values (?, ?, ?)
+       on conflict (name) do update set allowed_hosts = excluded.allowed_hosts`,
+    )
+    .run(name, JSON.stringify(allowedHosts), new Date().toISOString());
+  return getSecretMeta(name);
+}
+
+export function deleteSecretMeta(name: string) {
+  const info = getDatabase()
+    .prepare("delete from secrets where name = ?")
+    .run(name);
+  return { deleted: Number(info.changes) > 0 };
 }

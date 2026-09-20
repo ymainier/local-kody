@@ -11,6 +11,13 @@ import { importLegacyStorage } from "./package-storage.ts";
 import { socketFile } from "./paths.ts";
 import { executeRecorded, reconcileOnStartup } from "./runs.ts";
 import { search } from "./search.ts";
+import {
+  allowSecretHost,
+  listSecretNames,
+  migrateSecretsFile,
+  removeSecret,
+  setSecret,
+} from "./secrets.ts";
 import { executeInputSchema, searchInputSchema } from "./tools.ts";
 
 // The long-lived half of local-kody: it outlives every MCP client, owns the
@@ -32,6 +39,27 @@ async function route(path: string, body: unknown) {
       const { now } = (body ?? {}) as { now?: string };
       return { result: await tickScheduler(now ? new Date(now) : new Date()) };
     }
+    // The `secret` CLI's half of the socket. Values come in, never out.
+    case "/secrets/set": {
+      const { name, value, allowedHosts } = body as {
+        name: string;
+        value: string;
+        allowedHosts?: Array<string>;
+      };
+      return { result: await setSecret(name, value, allowedHosts ?? []) };
+    }
+    case "/secrets/allow": {
+      const { name, host } = body as { name: string; host: string };
+      return { result: allowSecretHost(name, host) };
+    }
+    case "/secrets/remove": {
+      const { name } = body as { name: string };
+      return { result: await removeSecret(name) };
+    }
+    case "/secrets/list":
+      return { result: listSecretNames() };
+    case "/secrets/migrate":
+      return { result: await migrateSecretsFile() };
     case "/tools/search":
       return { result: { text: search(searchInputSchema.parse(body)) } };
     case "/tools/execute":

@@ -3,7 +3,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,8 +126,9 @@ const childEnv = {
   KODY_HOME: kodyHome,
   KODY_SOCKET: socketFile,
   KODY_NPM_REGISTRY: `${apiUrl}/npm`,
-  // Keep the suite out of Notification Center.
+  // Keep the suite out of Notification Center, and off the real Keychain.
   KODY_NOTIFY: "stderr",
+  KODY_KEYCHAIN: "file",
 };
 
 const daemon = spawn(
@@ -204,6 +211,26 @@ async function callText(name: string, args: Record<string, unknown>) {
   return await callTextOn(client, name, args);
 }
 
+// The real `npm run secret` CLI, talking to this daemon over its socket.
+function runCli(args: Array<string>) {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [join(import.meta.dirname, "..", "src", "cli.ts"), ...args],
+      { env: childEnv, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.on("close", (code) =>
+      code === 0
+        ? resolve(stdout)
+        : reject(new Error(stderr.trim() || `cli exited ${String(code)}`)),
+    );
+  });
+}
+
 async function run(
   code: string,
   params: Record<string, unknown> = {},
@@ -257,6 +284,44 @@ await step("entity lookup returns a ready-to-run module", async () => {
   return "snippet present";
 });
 
+await step("the CLI moves secrets.json into the Keychain", async () => {
+  assert.equal(existsSync(join(kodyHome, "secrets.json")), true);
+  const output = await runCli(["migrate"]);
+  assert.match(output, /githubToken/);
+  assert.equal(
+    existsSync(join(kodyHome, "secrets.json")),
+    false,
+    "secrets.json survived the migration",
+  );
+  const { text } = await callText("search", { entity: "secret:githubToken" });
+  assert.match(text, /Allowed hosts: 127\.0\.0\.1/);
+  return output.trim();
+});
+
+await step(
+  "a secret set through the CLI is refused until allowed",
+  async () => {
+    const fetchIt = `export default async function main(params) {
+  return (await fetch(params.url, { headers: { authorization: 'Bearer {{secret:rotated}}' } })).status
+}`;
+    await runCli(["set", "rotated", "gh-test-token"]);
+    const refused = await run(fetchIt, { url: apiUrl });
+    assert.match(refused.error ?? "", /not approved for host 127\.0\.0\.1/);
+    await runCli(["allow", "rotated", "127.0.0.1"]);
+    const allowed = await run(fetchIt, { url: apiUrl });
+    assert.equal(allowed.result, 200);
+    const listed = await run(
+      `import { kody } from 'kody:runtime'
+export default async function main() { return await kody.secretList() }`,
+    );
+    assert.ok(
+      !JSON.stringify(listed.result).includes("gh-test-token"),
+      "secretList leaked a value",
+    );
+    return `refused, then ${String(allowed.result)} once allowed`;
+  },
+);
+
 await step(
   "npm import + capability + secret placeholder in one module",
   async () => {
@@ -277,7 +342,7 @@ export default async function main(params) {
     assert.deepEqual(outcome.result, {
       status: 200,
       events: 3,
-      secrets: ["githubToken"],
+      secrets: ["githubToken", "rotated"],
       age: "9 months",
     });
     return `${JSON.stringify(outcome.result)} in ${outcome.durationMs} ms`;

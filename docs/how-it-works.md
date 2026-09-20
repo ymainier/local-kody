@@ -102,6 +102,8 @@ await fetch("https://api.github.com/user", {
 
 The host reads the hostname from the URL, then substitutes `{{secret:name}}` in the URL, every header and the body, but only if that secret was approved for that hostname. Values only exist on the host side of the bridge. A capability that listed secret values would defeat this, so `secretList` returns names and approved hosts and there is deliberately no way to read a value back.
 
+The value itself is not in the database or in any file local-kody writes. It is in the login Keychain under the service `local-kody`, and the host fetches it at the moment of substitution. What the database holds is the name and the list of approved hosts, which is why `secretList` and the search index never have to touch the Keychain at all.
+
 Send the same token somewhere it was not approved for and you get an error naming the fix:
 
 ```
@@ -237,14 +239,15 @@ A job that fails sends a notification with its name and the first line of the er
 
 Inside `~/.local-kody`:
 
-| Path           | What                                                                  |
-| -------------- | --------------------------------------------------------------------- |
-| `packages/`    | One folder per saved package. The source of truth for code.           |
-| `kody.db`      | SQLite in WAL mode: package storage, run records, job schedule state. |
-| `secrets.json` | Values and approved hosts, mode 0600. Keychain is a later idea.       |
-| `daemon.sock`  | The only listener, mode 0600.                                         |
-| `logs/`        | `daemon.log`, where launchd sends stdout and stderr.                  |
-| `staging/`     | Where a package is checked before it is swapped into place.           |
+| Path          | What                                                                                    |
+| ------------- | --------------------------------------------------------------------------------------- |
+| `packages/`   | One folder per saved package. The source of truth for code.                             |
+| `kody.db`     | SQLite in WAL mode: package storage, run records, job schedule, secret names and hosts. |
+| `daemon.sock` | The only listener, mode 0600.                                                           |
+| `logs/`       | `daemon.log`, where launchd sends stdout and stderr.                                    |
+| `staging/`    | Where a package is checked before it is swapped into place.                             |
+
+Secret values live in the Keychain rather than here, so a backup of this folder carries no credentials.
 
 Schema changes are an ordered list of SQL strings in `src/store.ts`. The index of the last applied one is the version, so adding a migration means appending a string.
 

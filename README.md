@@ -36,38 +36,46 @@ npm run daemon:install # launchd agent: starts at login, restarts after a crash
 
 `npm run daemon` runs it in the foreground instead. `npm run daemon:logs` prints the last 200 lines of the log, and `npm run daemon:uninstall` removes the agent.
 
-Secrets are set by you, never by the agent:
+Secrets are set by you, never by the agent. Values go into the macOS Keychain under the service `local-kody`; the database keeps only the name and the hosts it may be sent to. The daemon has to be running, because it is the only process that writes:
 
 ```bash
 npm run secret -- set githubToken ghp_xxx --host api.github.com
 npm run secret -- allow githubToken uploads.github.com
+npm run secret -- remove githubToken
 npm run secret -- list
 ```
+
+Coming from an earlier version, `npm run secret -- migrate` moves `secrets.json` into the Keychain and deletes the file once every value reads back.
+
+macOS ties Keychain access to the binary that asks for it. Switching Node versions can therefore raise a one-off "local-kody wants to use your confidential information" prompt; tick "Always Allow".
 
 ## Where state lives
 
 `~/.local-kody`:
 
-| Path           | What                                                                   |
-| -------------- | ---------------------------------------------------------------------- |
-| `packages/`    | One folder per saved package. The folder is the source of truth.       |
-| `kody.db`      | SQLite (WAL): package storage, run records, job schedule state         |
-| `secrets.json` | Secret values and their approved hosts, mode 0600                      |
-| `daemon.sock`  | The daemon's only listener, mode 0600. There is no TCP port.           |
-| `logs/`        | `daemon.log`, where launchd sends stdout and stderr                    |
-| `staging/`     | Where a package is written and checked before it is swapped into place |
+| Path          | What                                                                   |
+| ------------- | ---------------------------------------------------------------------- |
+| `packages/`   | One folder per saved package. The folder is the source of truth.       |
+| `kody.db`     | SQLite (WAL): package storage, run records, job schedule, secret names |
+| `daemon.sock` | The daemon's only listener, mode 0600. There is no TCP port.           |
+| `logs/`       | `daemon.log`, where launchd sends stdout and stderr                    |
+| `staging/`    | Where a package is written and checked before it is swapped into place |
+
+Secret values are not here at all: they live in the login Keychain, service `local-kody`, account = the secret's name.
 
 Environment variables, all optional:
 
-| Variable                     | Default                      | Why you would set it                                    |
-| ---------------------------- | ---------------------------- | ------------------------------------------------------- |
-| `KODY_HOME`                  | `~/.local-kody`              | Run against a scratch home                              |
-| `KODY_DB`                    | `$KODY_HOME/kody.db`         | Point at another database file                          |
-| `KODY_SOCKET`                | `$KODY_HOME/daemon.sock`     | Run a second daemon alongside the real one              |
-| `KODY_DENO_BIN`              | the npm-installed Deno       | Use your own Deno                                       |
-| `KODY_NPM_REGISTRY`          | `https://registry.npmjs.org` | Pin versions from a private registry                    |
-| `KODY_NOTIFY`                | unset                        | `stderr` keeps notifications out of Notification Center |
-| `KODY_SCHEDULER_INTERVAL_MS` | `30000`                      | Tick the scheduler faster                               |
+| Variable                     | Default                      | Why you would set it                                                              |
+| ---------------------------- | ---------------------------- | --------------------------------------------------------------------------------- |
+| `KODY_HOME`                  | `~/.local-kody`              | Run against a scratch home                                                        |
+| `KODY_DB`                    | `$KODY_HOME/kody.db`         | Point at another database file                                                    |
+| `KODY_SOCKET`                | `$KODY_HOME/daemon.sock`     | Run a second daemon alongside the real one                                        |
+| `KODY_DENO_BIN`              | the npm-installed Deno       | Use your own Deno                                                                 |
+| `KODY_NPM_REGISTRY`          | `https://registry.npmjs.org` | Pin versions from a private registry                                              |
+| `KODY_NOTIFY`                | unset                        | `stderr` keeps notifications out of Notification Center                           |
+| `KODY_SCHEDULER_INTERVAL_MS` | `30000`                      | Tick the scheduler faster                                                         |
+| `KODY_KEYCHAIN`              | the macOS Keychain           | `file` swaps in a plaintext file, which is how `npm test` stays off your Keychain |
+| `KODY_KEYCHAIN_FILE`         | `$KODY_HOME/keychain.json`   | Where that file goes                                                              |
 
 ## Claude Desktop
 
@@ -154,7 +162,8 @@ curl -s --unix-socket /tmp/kody.sock -X POST http://localhost/scheduler/tick -d 
 | `src/search.ts`          | Lexical ranking, domain index, entity detail with ready-to-run modules                 |
 | `src/executor.ts`        | Import scanning, import map and scopes, `deno run` with locked permissions             |
 | `src/gateway.ts`         | The sandbox's only reachable address: `/call`, `/fetch`, `/storage`, `/log`, `/settle` |
-| `src/secrets.ts`         | Secret store and `{{secret:name}}` substitution per approved host                      |
+| `src/secrets.ts`         | Secret metadata and `{{secret:name}}` substitution per approved host                   |
+| `src/keychain.ts`        | Where a secret's value lives: the macOS Keychain, or a file under test                 |
 | `src/packages.ts`        | Reading saved packages, `kody:@scope/leaf/export` resolution, job schema               |
 | `src/publish.ts`         | `packageSave`: staging, pinned versions, `deno check`, dry import, swap                |
 | `src/package-storage.ts` | Which package owns a bucket, and the one-time import of phase 1 JSON                   |

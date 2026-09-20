@@ -10,6 +10,8 @@ export const packagesDir = join(kodyHome, "packages");
 export const storageDir = join(kodyHome, "storage");
 export const stagingDir = join(kodyHome, "staging");
 export const secretsFile = join(kodyHome, "secrets.json");
+export const keychainFile =
+  process.env.KODY_KEYCHAIN_FILE ?? join(kodyHome, "keychain.json");
 export const dbFile = process.env.KODY_DB ?? join(kodyHome, "kody.db");
 export const socketFile =
   process.env.KODY_SOCKET ?? join(kodyHome, "daemon.sock");

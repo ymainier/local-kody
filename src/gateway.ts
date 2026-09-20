@@ -35,20 +35,18 @@ async function readJson(request: IncomingMessage) {
 
 async function proxyFetch(request: FetchRequest, run: RunState) {
   const host = hostOf(request.url);
-  const headers = Object.fromEntries(
-    Object.entries(request.headers ?? {}).map(([key, value]) => [
-      key,
-      substituteSecrets(value, host),
-    ]),
-  );
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(request.headers ?? {})) {
+    headers[key] = await substituteSecrets(value, host);
+  }
   const method = request.method ?? "GET";
-  const upstream = await fetch(substituteSecrets(request.url, host), {
+  const upstream = await fetch(await substituteSecrets(request.url, host), {
     method,
     headers,
     body:
       request.body === undefined
         ? undefined
-        : substituteSecrets(request.body, host),
+        : await substituteSecrets(request.body, host),
     signal: AbortSignal.timeout(30_000),
   });
   run.logs.push(`[fetch] ${method} ${host} -> ${upstream.status}`);
