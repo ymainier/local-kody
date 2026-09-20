@@ -1,0 +1,44 @@
+{
+  "google": {
+    "authUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+    "tokenUrl": "https://oauth2.googleapis.com/token",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.readonly",
+      "https://www.googleapis.com/auth/gmail.readonly"
+    ],
+    "allowedHosts": [
+      "www.googleapis.com",
+      "gmail.googleapis.com",
+      "calendar.googleapis.com",
+      "people.googleapis.com"
+    ],
+    "authParams": { "access_type": "offline", "prompt": "consent" },
+    "note": "Google accepts any 127.0.0.1 port, so the redirect is ephemeral. Register the app as a Desktop client and add yourself as a test user. Without access_type=offline there is no refresh token."
+  },
+  "linear": {
+    "authUrl": "https://linear.app/oauth/authorize",
+    "tokenUrl": "https://api.linear.app/oauth/token",
+    "scopes": ["read", "write"],
+    "allowedHosts": ["api.linear.app"],
+    "redirectPort": 8765,
+    "note": "Linear matches the redirect URI exactly, so register http://127.0.0.1:8765/callback and keep the fixed port."
+  },
+  "notion": {
+    "authUrl": "https://api.notion.com/v1/oauth/authorize",
+    "tokenUrl": "https://api.notion.com/v1/oauth/token",
+    "scopes": [],
+    "allowedHosts": ["api.notion.com"],
+    "authParams": { "owner": "user" },
+    "tokenAuth": "basic",
+    "redirectPort": 8765,
+    "note": "Notion authenticates the token request with HTTP Basic and matches the redirect URI exactly: register http://127.0.0.1:8765/callback. Its tokens do not expire, so there is nothing to refresh."
+  },
+  "github": {
+    "authUrl": "https://github.com/login/oauth/authorize",
+    "tokenUrl": "https://github.com/login/oauth/access_token",
+    "scopes": ["repo", "read:user"],
+    "allowedHosts": ["api.github.com"],
+    "redirectPort": 8765,
+    "note": "An OAuth app (not a GitHub App) matches the callback URL exactly: register http://127.0.0.1:8765/callback. Tokens do not expire unless the app opts in."
+  }
+}

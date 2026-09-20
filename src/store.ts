@@ -44,6 +44,21 @@ const migrations: Array<string> = [
      allowed_hosts text not null,
      created_at text not null
    )`,
+  `create table integrations (
+     id text primary key,
+     auth_url text not null,
+     token_url text not null,
+     client_id text not null,
+     scopes text not null,
+     allowed_hosts text not null,
+     auth_params text,
+     token_auth text,
+     redirect_port integer,
+     expires_at text,
+     status text not null,
+     last_error text,
+     created_at text not null
+   )`,
 ];
 
 let database: DatabaseSync | null = null;
@@ -433,5 +448,142 @@ export function deleteSecretMeta(name: string) {
   const info = getDatabase()
     .prepare("delete from secrets where name = ?")
     .run(name);
+  return { deleted: Number(info.changes) > 0 };
+}
+
+// An integration is a saved OAuth connection. Everything secret about it (the
+// client secret and both tokens) is in the Keychain under integration:<id>:*;
+// what is here is the provider config, when the access token expires, and
+// whether the connection still works.
+export type IntegrationStatus =
+  "not_connected" | "connected" | "needs_reconnect";
+
+export type Integration = {
+  id: string;
+  authUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  scopes: Array<string>;
+  allowedHosts: Array<string>;
+  authParams: Record<string, string>;
+  tokenAuth: "body" | "basic";
+  redirectPort: number | null;
+  expiresAt: string | null;
+  status: IntegrationStatus;
+  lastError: string | null;
+  createdAt: string;
+};
+
+type IntegrationRow = {
+  id: string;
+  auth_url: string;
+  token_url: string;
+  client_id: string;
+  scopes: string;
+  allowed_hosts: string;
+  auth_params: string | null;
+  token_auth: string | null;
+  redirect_port: number | null;
+  expires_at: string | null;
+  status: string;
+  last_error: string | null;
+  created_at: string;
+};
+
+function toIntegration(row: IntegrationRow): Integration {
+  return {
+    id: row.id,
+    authUrl: row.auth_url,
+    tokenUrl: row.token_url,
+    clientId: row.client_id,
+    scopes: JSON.parse(row.scopes) as Array<string>,
+    allowedHosts: JSON.parse(row.allowed_hosts) as Array<string>,
+    authParams:
+      row.auth_params === null
+        ? {}
+        : (JSON.parse(row.auth_params) as Record<string, string>),
+    tokenAuth: row.token_auth === "basic" ? "basic" : "body",
+    redirectPort: row.redirect_port,
+    expiresAt: row.expires_at,
+    status: row.status as IntegrationStatus,
+    lastError: row.last_error,
+    createdAt: row.created_at,
+  };
+}
+
+export function listIntegrations() {
+  const rows = getDatabase()
+    .prepare("select * from integrations order by id")
+    .all() as Array<IntegrationRow>;
+  return rows.map(toIntegration);
+}
+
+export function getIntegration(id: string) {
+  const row = getDatabase()
+    .prepare("select * from integrations where id = ?")
+    .get(id) as IntegrationRow | undefined;
+  return row ? toIntegration(row) : null;
+}
+
+export function saveIntegration(config: {
+  id: string;
+  authUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  scopes: Array<string>;
+  allowedHosts: Array<string>;
+  authParams?: Record<string, string>;
+  tokenAuth?: "body" | "basic";
+  redirectPort?: number | null;
+}) {
+  getDatabase()
+    .prepare(
+      `insert into integrations (id, auth_url, token_url, client_id, scopes, allowed_hosts, auth_params, token_auth, redirect_port, status, created_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_connected', ?)
+       on conflict (id) do update set
+         auth_url = excluded.auth_url,
+         token_url = excluded.token_url,
+         client_id = excluded.client_id,
+         scopes = excluded.scopes,
+         allowed_hosts = excluded.allowed_hosts,
+         auth_params = excluded.auth_params,
+         token_auth = excluded.token_auth,
+         redirect_port = excluded.redirect_port`,
+    )
+    .run(
+      config.id,
+      config.authUrl,
+      config.tokenUrl,
+      config.clientId,
+      JSON.stringify(config.scopes),
+      JSON.stringify(config.allowedHosts),
+      JSON.stringify(config.authParams ?? {}),
+      config.tokenAuth ?? "body",
+      config.redirectPort ?? null,
+      new Date().toISOString(),
+    );
+  return getIntegration(config.id);
+}
+
+export function setIntegrationState(
+  id: string,
+  state: {
+    status: IntegrationStatus;
+    expiresAt?: string | null;
+    lastError?: string | null;
+  },
+) {
+  getDatabase()
+    .prepare(
+      "update integrations set status = ?, expires_at = ?, last_error = ? where id = ?",
+    )
+    .run(state.status, state.expiresAt ?? null, state.lastError ?? null, id);
+  return getIntegration(id);
+}
+
+export function deleteIntegration(id: string) {
+  const info = getDatabase()
+    .prepare("delete from integrations where id = ?")
+    .run(id);
   return { deleted: Number(info.changes) > 0 };
 }

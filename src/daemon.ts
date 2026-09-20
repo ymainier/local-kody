@@ -7,10 +7,17 @@ import {
 } from "node:http";
 import "./capabilities.ts";
 import { tickScheduler } from "./jobs.ts";
+import {
+  addIntegration,
+  allowIntegrationHost,
+  describeIntegrations,
+  setClientSecret,
+} from "./integrations.ts";
 import { importLegacyStorage } from "./package-storage.ts";
 import { socketFile } from "./paths.ts";
 import { executeRecorded, reconcileOnStartup } from "./runs.ts";
 import { search } from "./search.ts";
+import { deleteIntegration } from "./store.ts";
 import {
   allowSecretHost,
   listSecretNames,
@@ -60,6 +67,33 @@ async function route(path: string, body: unknown) {
       return { result: listSecretNames() };
     case "/secrets/migrate":
       return { result: await migrateSecretsFile() };
+    // The `integration` CLI's half of the socket: provider config in, never
+    // tokens out.
+    case "/integrations/add": {
+      const { clientSecret, ...config } = body as {
+        id: string;
+        clientId: string;
+        clientSecret: string;
+        scopes?: Array<string>;
+        allowedHosts?: Array<string>;
+        authUrl?: string;
+        tokenUrl?: string;
+        redirectPort?: number;
+      };
+      const saved = addIntegration(config);
+      await setClientSecret(config.id, clientSecret);
+      return { result: saved };
+    }
+    case "/integrations/allow": {
+      const { id, host } = body as { id: string; host: string };
+      return { result: allowIntegrationHost(id, host) };
+    }
+    case "/integrations/remove": {
+      const { id } = body as { id: string };
+      return { result: deleteIntegration(id) };
+    }
+    case "/integrations/list":
+      return { result: describeIntegrations() };
     case "/tools/search":
       return { result: { text: search(searchInputSchema.parse(body)) } };
     case "/tools/execute":

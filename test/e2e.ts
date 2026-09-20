@@ -2,7 +2,7 @@
 // daemon started here on a temp home and socket.
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -10,7 +10,12 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer, request as httpRequest } from "node:http";
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -35,9 +40,87 @@ type RunSummary = {
   error: string | null;
 };
 
+// A fake OAuth provider: it does a real PKCE check on the code exchange, hands
+// out a token that is always inside the refresh margin, and can be told to
+// refuse the next refresh.
+const oauth = {
+  challenge: "",
+  refreshes: 0,
+  failRefresh: false,
+  accessToken: "at-1",
+};
+
+function readBody(request: IncomingMessage) {
+  return new Promise<string>((resolve) => {
+    const chunks: Array<Buffer> = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  });
+}
+
+function pkceChallengeOf(verifier: string) {
+  return createHash("sha256").update(verifier).digest("base64url");
+}
+
+async function serveOauth(
+  path: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+) {
+  if (path === "/oauth/authorize") {
+    const query = new URL(request.url ?? "", "http://127.0.0.1").searchParams;
+    oauth.challenge = query.get("code_challenge") ?? "";
+    const back = new URL(query.get("redirect_uri") ?? "");
+    back.searchParams.set("code", "fake-code");
+    back.searchParams.set("state", query.get("state") ?? "");
+    response.statusCode = 302;
+    response.setHeader("location", back.toString());
+    return response.end();
+  }
+  const form = new URLSearchParams(await readBody(request));
+  const fail = (error: string) => {
+    response.statusCode = 400;
+    response.end(JSON.stringify({ error }));
+  };
+  if (form.get("client_id") !== "cid" || form.get("client_secret") !== "csec") {
+    return fail("invalid_client");
+  }
+  if (form.get("grant_type") === "refresh_token") {
+    if (oauth.failRefresh) return fail("invalid_grant");
+    if (form.get("refresh_token") !== "rt-1") return fail("invalid_grant");
+    oauth.refreshes += 1;
+    oauth.accessToken = `at-${oauth.refreshes + 1}`;
+    // Always inside the 60 s refresh margin, so every use exercises refresh.
+    return response.end(
+      JSON.stringify({ access_token: oauth.accessToken, expires_in: 30 }),
+    );
+  }
+  if (pkceChallengeOf(form.get("code_verifier") ?? "") !== oauth.challenge) {
+    return fail("invalid_grant");
+  }
+  response.end(
+    JSON.stringify({
+      access_token: "at-1",
+      refresh_token: "rt-1",
+      expires_in: 30,
+    }),
+  );
+}
+
 // Fake "GitHub" that checks the bearer token and serves public events, plus a
 // fake npm registry under /npm so dependency pinning never touches the network.
 const api = createServer((request, response) => {
+  const path = (request.url ?? "").split("?")[0] ?? "";
+  if (path.startsWith("/oauth/")) {
+    return void serveOauth(path, request, response);
+  }
+  // Echoes the credential it was shown, so a test can prove which token the
+  // gateway substituted.
+  if (path === "/whoami") {
+    return response.end(
+      JSON.stringify({ saw: request.headers.authorization ?? null }),
+    );
+  }
   const npmMatch = /^\/npm\/(.+)\/latest$/.exec(request.url ?? "");
   if (npmMatch) {
     const versions: Record<string, string> = { "date-fns": "4.1.0" };
@@ -129,6 +212,8 @@ const childEnv = {
   // Keep the suite out of Notification Center, and off the real Keychain.
   KODY_NOTIFY: "stderr",
   KODY_KEYCHAIN: "file",
+  // Nothing here may open a browser window.
+  KODY_OPEN: "none",
 };
 
 const daemon = spawn(
@@ -211,12 +296,12 @@ async function callText(name: string, args: Record<string, unknown>) {
   return await callTextOn(client, name, args);
 }
 
-// The real `npm run secret` CLI, talking to this daemon over its socket.
-function runCli(args: Array<string>) {
+// The real CLIs, talking to this daemon over its socket.
+function runScript(script: string, args: Array<string>) {
   return new Promise<string>((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      [join(import.meta.dirname, "..", "src", "cli.ts"), ...args],
+      [join(import.meta.dirname, "..", "src", script), ...args],
       { env: childEnv, stdio: ["ignore", "pipe", "pipe"] },
     );
     let stdout = "";
@@ -229,6 +314,14 @@ function runCli(args: Array<string>) {
         : reject(new Error(stderr.trim() || `cli exited ${String(code)}`)),
     );
   });
+}
+
+function runCli(args: Array<string>) {
+  return runScript("cli.ts", args);
+}
+
+function runIntegrationCli(args: Array<string>) {
+  return runScript("integration-cli.ts", args);
 }
 
 async function run(
@@ -754,6 +847,150 @@ await step("a tick notifies once the fake API has a new release", async () => {
   assert.equal(digest.notified, true);
   assert.equal(digest.message, "1 new");
   return `notified: ${digest.message}`;
+});
+
+type IntegrationView = {
+  id: string;
+  status: string;
+  scopes: Array<string>;
+  allowedHosts: Array<string>;
+  lastError: string | null;
+};
+
+const integrationList = `import { kody } from 'kody:runtime'
+export default async function main() { return await kody.integrationList() }`;
+
+const callWhoami = `export default async function main(params) {
+  const response = await fetch(params.url + '/whoami', {
+    headers: { authorization: 'Bearer {{integration:fake}}' },
+  })
+  return await response.json()
+}`;
+
+await step("the CLI configures a provider, not yet connected", async () => {
+  await runIntegrationCli([
+    "add",
+    "fake",
+    "--client-id",
+    "cid",
+    "--client-secret",
+    "csec",
+    "--auth-url",
+    `${apiUrl}/oauth/authorize`,
+    "--token-url",
+    `${apiUrl}/oauth/token`,
+    "--host",
+    "127.0.0.1",
+    "--scope",
+    "read",
+  ]);
+  const listed = await run(integrationList);
+  const fake = (listed.result as Array<IntegrationView>).find(
+    (candidate) => candidate.id === "fake",
+  );
+  assert.ok(fake, "fake integration not listed");
+  assert.equal(fake.status, "not_connected");
+  assert.deepEqual(fake.scopes, ["read"]);
+  const { text } = await callText("search", { entity: "integration:fake" });
+  assert.match(text, /Status: not_connected/);
+  assert.match(text, /\{\{integration:fake\}\}/);
+  return `${fake.id}: ${fake.status} for ${fake.allowedHosts.join(", ")}`;
+});
+
+await step("approving in the browser connects the integration", async () => {
+  const started = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.integrationStart(params) }`,
+    { id: "fake" },
+  );
+  assert.equal(started.error, undefined, started.error ?? "");
+  const { authorizeUrl } = started.result as { authorizeUrl: string };
+  const query = new URL(authorizeUrl).searchParams;
+  assert.equal(query.get("code_challenge_method"), "S256");
+  assert.ok(query.get("state"), "no state in the authorize URL");
+  // Play the browser: follow the redirect into the daemon's loopback listener.
+  const approved = await fetch(authorizeUrl);
+  assert.match(await approved.text(), /Connected/);
+  const listed = await run(integrationList);
+  const fake = (listed.result as Array<IntegrationView>).find(
+    (candidate) => candidate.id === "fake",
+  );
+  assert.equal(fake?.status, "connected");
+  assert.ok(
+    !/at-|rt-/.test(JSON.stringify(listed.result)),
+    "integrationList leaked a token",
+  );
+  return "connected, and the listing carries no token";
+});
+
+await step("two parallel calls refresh the token exactly once", async () => {
+  const before = oauth.refreshes;
+  const outcome = await run(
+    `export default async function main(params) {
+  const call = async () => (await fetch(params.url + '/whoami', {
+    headers: { authorization: 'Bearer {{integration:fake}}' },
+  })).json()
+  return await Promise.all([call(), call()])
+}`,
+    { url: apiUrl },
+  );
+  assert.equal(outcome.error, undefined, outcome.error ?? "");
+  assert.deepEqual(outcome.result, [
+    { saw: "Bearer at-2" },
+    { saw: "Bearer at-2" },
+  ]);
+  assert.equal(
+    oauth.refreshes - before,
+    1,
+    "the refresh was not single-flight",
+  );
+  return "both saw the refreshed token, one refresh";
+});
+
+await step("the same placeholder to another host is refused", async () => {
+  const before = oauth.refreshes;
+  const outcome = await run(callWhoami, {
+    url: apiUrl.replace("127.0.0.1", "localhost"),
+  });
+  assert.match(outcome.error ?? "", /not approved for host localhost/);
+  assert.match(outcome.error ?? "", /npm run integration -- allow fake/);
+  assert.equal(oauth.refreshes, before, "a refused host still cost a refresh");
+  return (outcome.error ?? "").split("\n")[0] ?? "";
+});
+
+await step("a refresh the provider refuses asks for a reconnect", async () => {
+  oauth.failRefresh = true;
+  const outcome = await run(callWhoami, { url: apiUrl });
+  assert.match(outcome.error ?? "", /could not refresh its token/);
+  assert.match(
+    outcome.error ?? "",
+    /kody\.integrationStart\(\{ id: 'fake' \}\)/,
+  );
+  const listed = await run(integrationList);
+  const fake = (listed.result as Array<IntegrationView>).find(
+    (candidate) => candidate.id === "fake",
+  );
+  assert.equal(fake?.status, "needs_reconnect");
+  assert.match(fake?.lastError ?? "", /invalid_grant/);
+  return `needs_reconnect: ${fake?.lastError ?? ""}`;
+});
+
+await step("revoking forgets the tokens and keeps the config", async () => {
+  const revoked = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.integrationRevoke(params) }`,
+    { id: "fake" },
+  );
+  assert.equal(revoked.error, undefined, revoked.error ?? "");
+  const outcome = await run(callWhoami, { url: apiUrl });
+  assert.match(outcome.error ?? "", /is not connected yet/);
+  const listed = await run(integrationList);
+  const fake = (listed.result as Array<IntegrationView>).find(
+    (candidate) => candidate.id === "fake",
+  );
+  assert.equal(fake?.status, "not_connected");
+  assert.deepEqual(fake?.allowedHosts, ["127.0.0.1"]);
+  return "tokens gone, provider config still there";
 });
 
 await step("two proxies share one daemon concurrently", async () => {

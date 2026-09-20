@@ -4,7 +4,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { callCapability } from "./registry.ts";
-import { hostOf, substituteSecrets } from "./secrets.ts";
+import { hostOf, substitutePlaceholders } from "./placeholders.ts";
 import { storageDelete, storageGet, storageList, storageSet } from "./store.ts";
 
 // The sandbox's only reachable address. Deno is started with
@@ -37,18 +37,21 @@ async function proxyFetch(request: FetchRequest, run: RunState) {
   const host = hostOf(request.url);
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(request.headers ?? {})) {
-    headers[key] = await substituteSecrets(value, host);
+    headers[key] = await substitutePlaceholders(value, host);
   }
   const method = request.method ?? "GET";
-  const upstream = await fetch(await substituteSecrets(request.url, host), {
-    method,
-    headers,
-    body:
-      request.body === undefined
-        ? undefined
-        : await substituteSecrets(request.body, host),
-    signal: AbortSignal.timeout(30_000),
-  });
+  const upstream = await fetch(
+    await substitutePlaceholders(request.url, host),
+    {
+      method,
+      headers,
+      body:
+        request.body === undefined
+          ? undefined
+          : await substitutePlaceholders(request.body, host),
+      signal: AbortSignal.timeout(30_000),
+    },
+  );
   run.logs.push(`[fetch] ${method} ${host} -> ${upstream.status}`);
   return {
     status: upstream.status,

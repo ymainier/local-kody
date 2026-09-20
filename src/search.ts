@@ -9,6 +9,7 @@ import {
   listCapabilities,
   type Capability,
 } from "./registry.ts";
+import { describeIntegrations } from "./integrations.ts";
 import { listSecretNames } from "./secrets.ts";
 import type { SearchInput } from "./tools.ts";
 
@@ -121,11 +122,21 @@ function buildEntries(): Array<SearchEntry> {
     keywordText: secret.allowedHosts.join(" "),
     bodyText: "secret token credential api key",
   }));
+  const integrationEntries = describeIntegrations().map((integration) => ({
+    ref: `integration:${integration.id}`,
+    domain: "integrations",
+    title: integration.id,
+    summary: `OAuth connection (${integration.status}). Use {{integration:${integration.id}}} in fetch to ${integration.allowedHosts.join(", ")}.`,
+    nameText: integration.id,
+    keywordText: `${integration.allowedHosts.join(" ")} ${integration.scopes.join(" ")}`,
+    bodyText: "integration oauth account connect login token",
+  }));
   return [
     ...capabilityEntries,
     ...packageEntries,
     ...guideEntries,
     ...secretEntries,
+    ...integrationEntries,
   ];
 }
 
@@ -212,7 +223,22 @@ function entityDetail(ref: string) {
       ? `## secret:${id}\nAllowed hosts: ${secret.allowedHosts.join(", ") || "none"}\nUse \`{{secret:${id}}}\` inside a fetch URL, header or body. The value is substituted outside the sandbox.`
       : `No secret "${id}".`;
   }
-  return `Unknown ref "${ref}". Types: capability, package, guide, secret.`;
+  if (type === "integration") {
+    const integration = describeIntegrations().find(
+      (candidate) => candidate.id === id,
+    );
+    if (!integration) return `No integration "${id}".`;
+    return [
+      `## integration:${id}`,
+      `Status: ${integration.status}${integration.lastError ? ` (${integration.lastError})` : ""}`,
+      `Scopes: ${integration.scopes.join(", ") || "none"}`,
+      `Approved hosts: ${integration.allowedHosts.join(", ") || "none"}`,
+      `Access token expires: ${integration.expiresAt ?? "never"}`,
+      "",
+      `Write \`{{integration:${id}}}\` where the bearer token goes; the host substitutes and refreshes it. Read guide:integrations.`,
+    ].join("\n");
+  }
+  return `Unknown ref "${ref}". Types: capability, package, guide, secret, integration.`;
 }
 
 function domainIndex(entries: Array<SearchEntry>) {

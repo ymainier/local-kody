@@ -11,7 +11,6 @@ import {
 // The name is also the Keychain account and goes into a `security` command
 // line, so keep it to the characters the placeholder already allows.
 const namePattern = /^[a-zA-Z0-9_]+$/;
-const placeholderPattern = /\{\{secret:([a-zA-Z0-9_]+)\}\}/g;
 
 export async function setSecret(
   name: string,
@@ -49,39 +48,27 @@ export function listSecretNames() {
   }));
 }
 
-export function hostOf(url: string) {
-  return new URL(url.replace(placeholderPattern, "placeholder")).hostname;
-}
-
-export async function substituteSecrets(text: string, host: string) {
-  const names = new Set(
-    [...text.matchAll(placeholderPattern)].map((match) => match[1] ?? ""),
-  );
-  if (names.size === 0) return text;
-  const values = new Map<string, string>();
-  for (const name of names) {
-    const secret = getSecretMeta(name);
-    if (!secret) {
-      throw new Error(
-        `Missing secret "${name}". Ask the user to run: npm run secret -- set ${name} <value> --host ${host}`,
-      );
-    }
-    if (!secret.allowedHosts.includes(host)) {
-      throw new Error(
-        `Secret "${name}" is not approved for host ${host}. Ask the user to run: npm run secret -- allow ${name} ${host}`,
-      );
-    }
-    const value = await keychain().get(name);
-    if (value === null) {
-      throw new Error(
-        `Secret "${name}" is known but its value is not in the Keychain. Ask the user to run: npm run secret -- set ${name} <value> --host ${host}`,
-      );
-    }
-    values.set(name, value);
+// What {{secret:name}} resolves to, or an error naming the command that fixes
+// it. Substitution itself lives in placeholders.ts, next to integrations.
+export async function secretValueFor(name: string, host: string) {
+  const secret = getSecretMeta(name);
+  if (!secret) {
+    throw new Error(
+      `Missing secret "${name}". Ask the user to run: npm run secret -- set ${name} <value> --host ${host}`,
+    );
   }
-  return text.replace(placeholderPattern, (_, name: string) =>
-    String(values.get(name)),
-  );
+  if (!secret.allowedHosts.includes(host)) {
+    throw new Error(
+      `Secret "${name}" is not approved for host ${host}. Ask the user to run: npm run secret -- allow ${name} ${host}`,
+    );
+  }
+  const value = await keychain().get(name);
+  if (value === null) {
+    throw new Error(
+      `Secret "${name}" is known but its value is not in the Keychain. Ask the user to run: npm run secret -- set ${name} <value> --host ${host}`,
+    );
+  }
+  return value;
 }
 
 // One-way trip out of the phase 1 plaintext file. Every value is written to

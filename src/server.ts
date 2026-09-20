@@ -1,7 +1,10 @@
-import { request as httpRequest } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { socketFile } from "./paths.ts";
+import {
+  callDaemon,
+  isDaemonMissing,
+  type DaemonEnvelope,
+} from "./daemon-client.ts";
 import {
   executeInputSchema,
   executeToolDescription,
@@ -18,46 +21,11 @@ const startHint = `The local-kody daemon is not running, so no tool can do any w
 Ask the user to start it: \`npm run daemon:install\` installs it as a launchd agent, or \`npm run daemon\` runs it in the foreground.
 Logs: \`npm run daemon:logs\`.`;
 
-type DaemonEnvelope = { result?: unknown; error?: string };
-
-function callDaemon(path: string, body: unknown) {
-  return new Promise<DaemonEnvelope>((resolve, reject) => {
-    const request = httpRequest(
-      {
-        socketPath: socketFile,
-        path,
-        method: "POST",
-        headers: { "content-type": "application/json" },
-      },
-      (response) => {
-        const chunks: Array<Buffer> = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => {
-          try {
-            resolve(
-              JSON.parse(
-                Buffer.concat(chunks).toString("utf8") || "{}",
-              ) as DaemonEnvelope,
-            );
-          } catch (error) {
-            reject(error as Error);
-          }
-        });
-      },
-    );
-    request.on("error", reject);
-    request.end(JSON.stringify(body ?? {}));
-  });
-}
-
 async function forward(path: string, body: unknown): Promise<DaemonEnvelope> {
   try {
     return await callDaemon(path, body);
   } catch (error) {
-    const code = (error as { code?: string }).code;
-    if (code === "ENOENT" || code === "ECONNREFUSED") {
-      return { error: startHint };
-    }
+    if (isDaemonMissing(error)) return { error: startHint };
     return { error: error instanceof Error ? error.message : String(error) };
   }
 }

@@ -18,6 +18,11 @@ export const socketFile =
 export const logsDir = join(kodyHome, "logs");
 export const daemonLogFile = join(logsDir, "daemon.log");
 export const guidesDir = join(projectRoot, "guides");
+export const oauthPresetsFile = join(
+  projectRoot,
+  "presets",
+  "oauth-providers.json",
+);
 export const denoBin =
   process.env.KODY_DENO_BIN ??
   join(projectRoot, "node_modules", ".bin", "deno");

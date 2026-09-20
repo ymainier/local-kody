@@ -2,6 +2,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { listJobs, runJobOnce, updateJob } from "./jobs.ts";
+import {
+  describeIntegrations,
+  revokeIntegration,
+  startIntegration,
+} from "./integrations.ts";
 import { listPackages, packageKodySchema } from "./packages.ts";
 import { savePackage } from "./publish.ts";
 import { defineCapability } from "./registry.ts";
@@ -57,6 +62,68 @@ defineCapability({
   inputSchema: z.object({}),
   async handler() {
     return listSecretNames();
+  },
+});
+
+defineCapability({
+  name: "integrationList",
+  domain: "integrations",
+  description:
+    'List saved OAuth connections: id, status ("not_connected", "connected" or "needs_reconnect"), scopes, approved hosts and when the access token expires. Tokens are never returned. Spend one in fetch by writing {{integration:id}} where the bearer token goes. Read guide:integrations first.',
+  keywords: [
+    "integration",
+    "oauth",
+    "connect",
+    "google",
+    "calendar",
+    "gmail",
+    "linear",
+    "notion",
+    "account",
+    "login",
+  ],
+  inputSchema: z.object({}),
+  async handler() {
+    return describeIntegrations();
+  },
+});
+
+defineCapability({
+  name: "integrationStart",
+  domain: "integrations",
+  description:
+    'Begin connecting an OAuth integration. Returns the authorize URL and opens it in the user\'s browser; only the user can approve it, so say so and stop. Poll integrationList afterwards: the status becomes "connected" when they have, or lastError says what went wrong.',
+  keywords: [
+    "integration",
+    "oauth",
+    "connect",
+    "authorize",
+    "reconnect",
+    "login",
+  ],
+  destructive: true,
+  inputSchema: z.object({
+    id: z.string().describe('Integration id, e.g. "google"'),
+    scopes: z
+      .array(z.string())
+      .optional()
+      .describe("Override the scopes the integration was configured with"),
+  }),
+  async handler(input) {
+    return startIntegration(input);
+  },
+});
+
+defineCapability({
+  name: "integrationRevoke",
+  domain: "integrations",
+  description:
+    "Forget an integration's tokens. Its provider config stays, so integrationStart can connect it again without the user re-entering anything.",
+  keywords: ["integration", "revoke", "disconnect", "forget", "sign out"],
+  destructive: true,
+  inputSchema: z.object({ id: z.string() }),
+  async handler({ id }) {
+    return revokeIntegration(id);
   },
 });
 

@@ -113,6 +113,26 @@ Ask the user to run: npm run secret -- allow githubToken localhost
 
 That phrasing is a convention, not a courtesy. Every error across the bridge names the next step, because the reader is a model deciding what to do next, and "permission denied" gives it nothing to do.
 
+## Services you log into
+
+An API key is one thing; a Google account is another. For those there are **integrations**: saved OAuth connections, each with a provider config, a pair of tokens and a list of hosts its token may reach.
+
+Connecting one is the only place in local-kody where the agent genuinely cannot finish the job. `kody.integrationStart({ id: "google" })` builds an authorize URL with PKCE and a random `state`, opens a one-shot HTTP listener on a loopback port, and points the redirect at it. Then it returns the URL and stops. A human clicks Allow. The provider redirects the browser back to `http://127.0.0.1:<port>/callback`, the daemon checks `state`, trades the code for tokens using the PKCE verifier, and answers the browser with a page that says it worked. Five minutes with no callback and the listener closes with a reason the agent can read in `integrationList`.
+
+The agent polls for the outcome rather than waiting on it, because a sandbox run is capped at 60 seconds and approval takes as long as it takes.
+
+After that it looks exactly like a secret:
+
+```ts
+headers: {
+  authorization: "Bearer {{integration:google}}";
+}
+```
+
+with one extra move on the host side. Before substituting, the gateway checks whether the access token expires within the next minute and refreshes it if so. Two runs hitting an expired token at the same moment would otherwise both spend the refresh token, and providers that rotate refresh tokens would invalidate whichever came second. So refreshes go through a map of in-flight promises keyed by integration: the second caller waits on the first one's request. A refresh the provider rejects flips the status to `needs_reconnect` and returns an error naming `integrationStart`, which is the one thing that fixes it.
+
+Host approval is checked before any of that, so pointing a token at somewhere it was never meant to go does not even cost a refresh.
+
 ## Packages
 
 A package is a folder under `~/.local-kody/packages/@scope/leaf` with a `package.json` whose `exports` map names callable modules. The folder is the source of truth. Saved code is imported by a custom scheme:

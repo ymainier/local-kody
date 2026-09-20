@@ -49,6 +49,16 @@ Coming from an earlier version, `npm run secret -- migrate` moves `secrets.json`
 
 macOS ties Keychain access to the binary that asks for it. Switching Node versions can therefore raise a one-off "local-kody wants to use your confidential information" prompt; tick "Always Allow".
 
+For a service you log into rather than hold an API key for, configure an **integration**. Register an OAuth app with the provider, then hand local-kody its client id and secret:
+
+```bash
+npm run integration -- presets
+npm run integration -- add google --client-id xxx.apps.googleusercontent.com --client-secret yyy
+npm run integration -- list
+```
+
+Known ids (`google`, `linear`, `notion`, `github`) fill in their URLs, scopes and API hosts from `presets/oauth-providers.json`; anything else takes `--auth-url`, `--token-url` and `--host`. Connecting is the agent's job and yours together: ask it to run `kody.integrationStart({ id })`, approve the page that opens, and the daemon's loopback listener finishes the exchange. Code then writes `{{integration:google}}` where a bearer token goes, and the host refreshes the token when it is about to expire.
+
 ## Where state lives
 
 `~/.local-kody`:
@@ -76,6 +86,7 @@ Environment variables, all optional:
 | `KODY_SCHEDULER_INTERVAL_MS` | `30000`                      | Tick the scheduler faster                                                         |
 | `KODY_KEYCHAIN`              | the macOS Keychain           | `file` swaps in a plaintext file, which is how `npm test` stays off your Keychain |
 | `KODY_KEYCHAIN_FILE`         | `$KODY_HOME/keychain.json`   | Where that file goes                                                              |
+| `KODY_OPEN`                  | unset                        | `none` stops `integrationStart` opening a browser                                 |
 
 ## Claude Desktop
 
@@ -107,15 +118,16 @@ Environment variables, all optional:
 
 Capabilities are host functions the sandbox reaches as `kody.<name>(input)`. They are never MCP tools of their own: `search` surfaces them and `execute` calls them.
 
-| Domain     | Capabilities                        |
-| ---------- | ----------------------------------- |
-| `notify`   | `notifySelf`                        |
-| `secrets`  | `secretList`                        |
-| `packages` | `packageSave`, `packageList`        |
-| `runs`     | `runList`, `runGet`                 |
-| `jobs`     | `jobList`, `jobRunNow`, `jobUpdate` |
+| Domain         | Capabilities                                               |
+| -------------- | ---------------------------------------------------------- |
+| `notify`       | `notifySelf`                                               |
+| `secrets`      | `secretList`                                               |
+| `integrations` | `integrationList`, `integrationStart`, `integrationRevoke` |
+| `packages`     | `packageSave`, `packageList`                               |
+| `runs`         | `runList`, `runGet`                                        |
+| `jobs`         | `jobList`, `jobRunNow`, `jobUpdate`                        |
 
-The guides in `guides/` are written for the agent and come back through `search`: `guide:packages` for saving code, `guide:storage` for state, `guide:jobs` for schedules.
+The guides in `guides/` are written for the agent and come back through `search`: `guide:packages` for saving code, `guide:storage` for state, `guide:jobs` for schedules, `guide:integrations` for OAuth services.
 
 For how the machine itself works, read [docs/how-it-works.md](docs/how-it-works.md).
 
@@ -158,12 +170,15 @@ curl -s --unix-socket /tmp/kody.sock -X POST http://localhost/scheduler/tick -d 
 | `src/tools.ts`           | The two tool schemas and the server instructions, shared by both                       |
 | `src/launchd.ts`         | `daemon:install` / `daemon:uninstall` / `daemon:logs`                                  |
 | `src/registry.ts`        | `defineCapability`, Zod-validated host functions                                       |
-| `src/capabilities.ts`    | The nine capabilities listed above                                                     |
+| `src/capabilities.ts`    | The twelve capabilities listed above                                                   |
 | `src/search.ts`          | Lexical ranking, domain index, entity detail with ready-to-run modules                 |
 | `src/executor.ts`        | Import scanning, import map and scopes, `deno run` with locked permissions             |
 | `src/gateway.ts`         | The sandbox's only reachable address: `/call`, `/fetch`, `/storage`, `/log`, `/settle` |
 | `src/secrets.ts`         | Secret metadata and `{{secret:name}}` substitution per approved host                   |
 | `src/keychain.ts`        | Where a secret's value lives: the macOS Keychain, or a file under test                 |
+| `src/placeholders.ts`    | One substitution pass over `{{secret:name}}` and `{{integration:id}}`                  |
+| `src/integrations.ts`    | OAuth: the PKCE connect flow, the loopback listener, refresh with a single-flight lock |
+| `src/daemon-client.ts`   | How the proxy and both CLIs reach the daemon socket                                    |
 | `src/packages.ts`        | Reading saved packages, `kody:@scope/leaf/export` resolution, job schema               |
 | `src/publish.ts`         | `packageSave`: staging, pinned versions, `deno check`, dry import, swap                |
 | `src/package-storage.ts` | Which package owns a bucket, and the one-time import of phase 1 JSON                   |

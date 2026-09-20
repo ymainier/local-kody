@@ -10,6 +10,7 @@ Inside execute:
 - import { kody } from 'kody:runtime' and call capabilities as await kody.<name>(input).
 - Import npm packages by bare name (e.g. import { parse } from 'date-fns'); they resolve from npm.
 - fetch works only through the host; write {{secret:name}} where a credential goes. You never see values.
+- For a service the user logged into (Google, Linear, Notion), write {{integration:id}} where the bearer token goes; the host refreshes it for you (read guide:integrations).
 - Import saved packages with import fn from 'kody:@scope/leaf/<export>'.
 - State belongs to a package: inside a saved module, import { packageStorage } from 'kody:runtime' (read guide:storage).
 Prefer reusing a saved package over rewriting the logic. Offer to save working code as a package (read guide:packages first).`;
