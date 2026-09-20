@@ -47,7 +47,7 @@ npm run secret -- list
 
 Coming from an earlier version, `npm run secret -- migrate` moves `secrets.json` into the Keychain and deletes the file once every value reads back.
 
-macOS ties Keychain access to the binary that asks for it. Switching Node versions can therefore raise a one-off "local-kody wants to use your confidential information" prompt; tick "Always Allow".
+Reads and writes go through `/usr/bin/security`, which is also the application the Keychain grants access to, so changing Node versions does not disturb it. If macOS does ask whether `security` may use your confidential information, tick "Always Allow".
 
 For a service you log into rather than hold an API key for, configure an **integration**. Register an OAuth app with the provider, then hand local-kody its client id and secret:
 
