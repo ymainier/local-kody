@@ -30,7 +30,7 @@ The process your MCP client spawns is a proxy and nothing else. Claude Desktop o
 
 ```bash
 npm install
-npm test               # 32 checks: the scheduler with a fake clock, then end-to-end over MCP stdio
+npm test               # 46 checks: the scheduler with a fake clock, then end-to-end over MCP stdio
 npm run daemon:install # launchd agent: starts at login, restarts after a crash
 ```
 
