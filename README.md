@@ -87,6 +87,8 @@ Environment variables, all optional:
 | `KODY_KEYCHAIN`              | the macOS Keychain           | `file` swaps in a plaintext file, which is how `npm test` stays off your Keychain |
 | `KODY_KEYCHAIN_FILE`         | `$KODY_HOME/keychain.json`   | Where that file goes                                                              |
 | `KODY_OPEN`                  | unset                        | `none` stops `integrationStart` opening a browser                                 |
+| `KODY_MCP_TIMEOUT_MS`        | `20000`                      | How long to wait for an MCP server to start                                       |
+| `KODY_MCP_IDLE_MS`           | `300000`                     | How long an idle MCP connection is kept open                                      |
 
 ## Claude Desktop
 
@@ -126,8 +128,11 @@ Capabilities are host functions the sandbox reaches as `kody.<name>(input)`. The
 | `packages`     | `packageSave`, `packageList`                               |
 | `runs`         | `runList`, `runGet`                                        |
 | `jobs`         | `jobList`, `jobRunNow`, `jobUpdate`                        |
+| `mcp`          | `mcpList`, `mcpAdd`, `mcpUpdate`, `mcpRemove`              |
 
-The guides in `guides/` are written for the agent and come back through `search`: `guide:packages` for saving code, `guide:storage` for state, `guide:jobs` for schedules, `guide:integrations` for OAuth services.
+The guides in `guides/` are written for the agent and come back through `search`: `guide:packages` for saving code, `guide:storage` for state, `guide:jobs` for schedules, `guide:integrations` for OAuth services, `guide:mcp` for other MCP servers.
+
+local-kody can also call **other MCP servers** on your behalf, which keeps it a hub rather than another silo. Ask the agent to run `kody.mcpAdd({ name, command, args })`; their tools then arrive in sandbox code as `kody.mcp['<server>'].<tool>(args)`, and the MCP tool list local-kody itself exposes stays `search` + `execute`.
 
 For how the machine itself works, read [docs/how-it-works.md](docs/how-it-works.md).
 
@@ -170,7 +175,7 @@ curl -s --unix-socket /tmp/kody.sock -X POST http://localhost/scheduler/tick -d 
 | `src/tools.ts`           | The two tool schemas and the server instructions, shared by both                       |
 | `src/launchd.ts`         | `daemon:install` / `daemon:uninstall` / `daemon:logs`                                  |
 | `src/registry.ts`        | `defineCapability`, Zod-validated host functions                                       |
-| `src/capabilities.ts`    | The twelve capabilities listed above                                                   |
+| `src/capabilities.ts`    | The sixteen capabilities listed above                                                  |
 | `src/search.ts`          | Lexical ranking, domain index, entity detail with ready-to-run modules                 |
 | `src/executor.ts`        | Import scanning, import map and scopes, `deno run` with locked permissions             |
 | `src/gateway.ts`         | The sandbox's only reachable address: `/call`, `/fetch`, `/storage`, `/log`, `/settle` |
@@ -178,6 +183,7 @@ curl -s --unix-socket /tmp/kody.sock -X POST http://localhost/scheduler/tick -d 
 | `src/keychain.ts`        | Where a secret's value lives: the macOS Keychain, or a file under test                 |
 | `src/placeholders.ts`    | One substitution pass over `{{secret:name}}` and `{{integration:id}}`                  |
 | `src/integrations.ts`    | OAuth: the PKCE connect flow, the loopback listener, refresh with a single-flight lock |
+| `src/mcp.ts`             | Calling other MCP servers: lazy connection pool, auth, tool calls                      |
 | `src/daemon-client.ts`   | How the proxy and both CLIs reach the daemon socket                                    |
 | `src/packages.ts`        | Reading saved packages, `kody:@scope/leaf/export` resolution, job schema               |
 | `src/publish.ts`         | `packageSave`: staging, pinned versions, `deno check`, dry import, swap                |

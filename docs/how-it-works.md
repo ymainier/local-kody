@@ -255,6 +255,16 @@ The clock is a parameter. `tickScheduler(now)` takes the date, which is why `tes
 
 A job that fails sends a notification with its name and the first line of the error. A job that fails silently is worse than one that never ran.
 
+## Being a client, not only a server
+
+The same argument that says local-kody should have two tools says it should not grow a tool for Linear, one for a filesystem server, one for whatever comes next. So it calls other MCP servers instead: `kody.mcpAdd` registers one, `search` lists it as `mcp-server:<name>`, and sandbox code reaches its tools as `kody.mcp['linear'].create_issue(args)`. Those tools never appear in local-kody's own tool list, which stays two entries long.
+
+The daemon keeps a lazy pool of client connections: a server starts on first use and closes after five idle minutes. Adding one connects immediately rather than at first use, because a server that cannot start should fail while someone is watching, and a failed add leaves nothing behind.
+
+Credentials arrive the way they do everywhere else. A local server's secret goes into its environment, where `"{{secret:name}}"` is replaced as it starts. A remote server's is a bearer token from a secret or an integration, resolved at connect time so a refreshed token is picked up without reconfiguring anything.
+
+One thing here is different in kind from the rest of the system. Everything else in local-kody is code you or your agent wrote, running on your machine. A remote MCP server's tool names, descriptions and results are written by someone else, and they arrive in the same text channel your agent reads its instructions from. They are data. `guides/mcp.md` says so in the words the agent will read, and the entity view labels a server's instructions as coming from that server, but the real defence is not handing a server a credential it did not already need.
+
 ## Where things live
 
 Inside `~/.local-kody`:

@@ -95,7 +95,7 @@ async function route(path: string, body: unknown) {
     case "/integrations/list":
       return { result: describeIntegrations() };
     case "/tools/search":
-      return { result: { text: search(searchInputSchema.parse(body)) } };
+      return { result: { text: await search(searchInputSchema.parse(body)) } };
     case "/tools/execute":
       return { result: await executeRecorded(executeInputSchema.parse(body)) };
     default:

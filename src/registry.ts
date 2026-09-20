@@ -64,7 +64,13 @@ export async function callCapability(name: string, input: unknown) {
 }
 
 export function describeInput(capability: Capability) {
-  const schema = z.toJSONSchema(capability.inputSchema) as {
+  return describeJsonSchema(z.toJSONSchema(capability.inputSchema));
+}
+
+// Renders a JSON Schema object as a TypeScript-ish shape. Used for capability
+// inputs and for the tool schemas other MCP servers report.
+export function describeJsonSchema(raw: unknown) {
+  const schema = raw as {
     properties?: Record<string, { type?: string; description?: string }>;
     required?: Array<string>;
   };

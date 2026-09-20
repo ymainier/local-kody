@@ -48,6 +48,22 @@ export function listSecretNames() {
   }));
 }
 
+// The value with no host check at all, for a credential that is handed to a
+// local process rather than sent anywhere: a stdio MCP server's env. There is
+// no host to approve, so configuring that server is the approval.
+export async function secretValueForLocalProcess(name: string) {
+  if (!getSecretMeta(name)) {
+    throw new Error(
+      `Missing secret "${name}". Ask the user to run: npm run secret -- set ${name} <value>`,
+    );
+  }
+  const value = await keychain().get(name);
+  if (value === null) {
+    throw new Error(`Secret "${name}" has no value in the Keychain.`);
+  }
+  return value;
+}
+
 // What {{secret:name}} resolves to, or an error naming the command that fixes
 // it. Substitution itself lives in placeholders.ts, next to integrations.
 export async function secretValueFor(name: string, host: string) {

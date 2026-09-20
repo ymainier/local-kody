@@ -7,6 +7,12 @@ import {
   revokeIntegration,
   startIntegration,
 } from "./integrations.ts";
+import {
+  addMcpServer,
+  describeMcpServers,
+  removeMcpServer,
+  updateMcpServer,
+} from "./mcp.ts";
 import { listPackages, packageKodySchema } from "./packages.ts";
 import { savePackage } from "./publish.ts";
 import { defineCapability } from "./registry.ts";
@@ -124,6 +130,83 @@ defineCapability({
   inputSchema: z.object({ id: z.string() }),
   async handler({ id }) {
     return revokeIntegration(id);
+  },
+});
+
+defineCapability({
+  name: "mcpList",
+  domain: "mcp",
+  description:
+    "List the MCP servers local-kody can call, with their transport, whether they are enabled and the tools each one offers. Call one from sandbox code as await kody.mcp['<server>'].<tool>(args). Open search entity mcp-server:<name> for input types. Read guide:mcp first.",
+  keywords: [
+    "mcp",
+    "server",
+    "tool",
+    "external",
+    "connect",
+    "linear",
+    "filesystem",
+  ],
+  inputSchema: z.object({}),
+  async handler() {
+    return describeMcpServers();
+  },
+});
+
+defineCapability({
+  name: "mcpAdd",
+  domain: "mcp",
+  description:
+    "Register another MCP server so packages can call its tools. The server is started once straight away to check it works and to read its tool list; if it will not start, nothing is saved. Ask the user before adding a server that is not already on their machine.",
+  keywords: ["mcp", "add", "register", "server", "install", "connect"],
+  destructive: true,
+  inputSchema: z.object({
+    name: z.string().describe("Short lowercase id you will call it by"),
+    transport: z
+      .enum(["stdio", "http"])
+      .optional()
+      .describe("Defaults to http when url is given, stdio otherwise"),
+    command: z.string().optional().describe('For stdio, e.g. "npx"'),
+    args: z.array(z.string()).optional(),
+    env: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        'For stdio. A value of "{{secret:name}}" is replaced with that secret when the server starts.',
+      ),
+    url: z.string().optional().describe("For http"),
+    auth: z
+      .string()
+      .optional()
+      .describe('"none", "secret:<name>" or "integration:<id>" (http only)'),
+  }),
+  async handler(input) {
+    return addMcpServer(input);
+  },
+});
+
+defineCapability({
+  name: "mcpUpdate",
+  domain: "mcp",
+  description:
+    "Turn an MCP server on or off. A disabled server refuses calls and keeps its configuration.",
+  keywords: ["mcp", "enable", "disable", "pause", "server"],
+  destructive: true,
+  inputSchema: z.object({ name: z.string(), enabled: z.boolean() }),
+  async handler(input) {
+    return updateMcpServer(input);
+  },
+});
+
+defineCapability({
+  name: "mcpRemove",
+  domain: "mcp",
+  description: "Forget an MCP server entirely.",
+  keywords: ["mcp", "remove", "delete", "forget", "server"],
+  destructive: true,
+  inputSchema: z.object({ name: z.string() }),
+  async handler({ name }) {
+    return removeMcpServer(name);
   },
 });
 

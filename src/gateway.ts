@@ -3,6 +3,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { callMcpTool } from "./mcp.ts";
 import { callCapability } from "./registry.ts";
 import { hostOf, substitutePlaceholders } from "./placeholders.ts";
 import { storageDelete, storageGet, storageList, storageSet } from "./store.ts";
@@ -106,6 +107,15 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
         return reply(await proxyFetch(body as FetchRequest, run));
       case "/storage":
         return reply({ result: storageOperation(body, run, request.headers) });
+      case "/mcp": {
+        const call = body as {
+          server: string;
+          tool: string;
+          args?: Record<string, unknown>;
+        };
+        run.logs.push(`[mcp] ${call.server}.${call.tool}`);
+        return reply({ result: await callMcpTool(call) });
+      }
       case "/log":
         run.logs.push(String(body.line));
         return reply({ result: null });

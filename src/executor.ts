@@ -67,8 +67,13 @@ for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
   console[level] = (...parts) => void post('/log', { line: (level === 'log' ? '' : '[' + level + '] ') + format(parts) })
 }
 export function makeKody(token) {
+  const mcp = new Proxy({}, {
+    get: (_, server) => new Proxy({}, {
+      get: (_, tool) => async (args) => (await post('/mcp', { server: String(server), tool: String(tool), args }, token)).result,
+    }),
+  })
   return new Proxy({}, {
-    get: (_, name) => async (input) => (await post('/call', { name: String(name), input }, token)).result,
+    get: (_, name) => name === 'mcp' ? mcp : async (input) => (await post('/call', { name: String(name), input }, token)).result,
   })
 }
 export function packageStorageFor(token) {

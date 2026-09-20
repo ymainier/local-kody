@@ -214,6 +214,8 @@ const childEnv = {
   KODY_KEYCHAIN: "file",
   // Nothing here may open a browser window.
   KODY_OPEN: "none",
+  // A server that will not start should fail fast rather than stall the suite.
+  KODY_MCP_TIMEOUT_MS: "3000",
 };
 
 const daemon = spawn(
@@ -991,6 +993,97 @@ export default async function main(params) { return await kody.integrationRevoke
   assert.equal(fake?.status, "not_connected");
   assert.deepEqual(fake?.allowedHosts, ["127.0.0.1"]);
   return "tokens gone, provider config still there";
+});
+
+type McpView = { name: string; enabled: boolean; tools: Array<string> };
+type McpContent = { content: Array<{ type: string; text: string }> };
+
+const echoFixture = join(import.meta.dirname, "fixtures", "echo-server.ts");
+
+await step("mcpAdd registers a server and search finds it", async () => {
+  const added = await run(callCapability, {
+    name: "mcpAdd",
+    input: {
+      name: "echo",
+      command: process.execPath,
+      args: [echoFixture],
+      env: { ECHO_TOKEN: "{{secret:githubToken}}" },
+    },
+  });
+  assert.equal(added.error, undefined, added.error ?? "");
+  assert.deepEqual((added.result as McpView).tools, ["echo", "whoami"]);
+  const { text } = await callText("search", { query: "echo server" });
+  assert.match(text.split("\n")[1] ?? "", /mcp-server:echo/);
+  return text.split("\n")[1] ?? "";
+});
+
+await step("opening the server lists its tools and a module", async () => {
+  const { text } = await callText("search", { entity: "mcp-server:echo" });
+  assert.match(text, /It echoes text and reports its token/);
+  assert.match(text, /text: string/);
+  assert.match(text, /kody\.mcp\['echo'\]\.echo\(params\)/);
+  return "instructions, input type and a snippet";
+});
+
+await step("sandbox code calls another server's tool", async () => {
+  const outcome = await run(
+    `export default async function main(params) {
+  return await kody.mcp['echo'].echo({ text: params.text })
+}
+import { kody } from 'kody:runtime'`,
+    { text: "through two MCP hops" },
+  );
+  assert.equal(outcome.error, undefined, outcome.error ?? "");
+  assert.equal(
+    (outcome.result as McpContent).content[0]?.text,
+    "through two MCP hops",
+  );
+  return String((outcome.result as McpContent).content[0]?.text);
+});
+
+await step("a secret named in its env reaches the server", async () => {
+  const outcome = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main() {
+  return await kody.mcp['echo'].whoami({})
+}`,
+  );
+  assert.equal(
+    (outcome.result as McpContent).content[0]?.text,
+    "gh-test-token",
+  );
+  return "the server got the real token, the sandbox never did";
+});
+
+await step("a disabled server refuses calls", async () => {
+  await run(callCapability, {
+    name: "mcpUpdate",
+    input: { name: "echo", enabled: false },
+  });
+  const outcome = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main() { return await kody.mcp['echo'].echo({ text: 'hi' }) }`,
+  );
+  assert.match(outcome.error ?? "", /is disabled/);
+  assert.match(outcome.error ?? "", /kody\.mcpUpdate/);
+  const back = await run(callCapability, {
+    name: "mcpUpdate",
+    input: { name: "echo", enabled: true },
+  });
+  assert.equal((back.result as McpView).enabled, true);
+  return (outcome.error ?? "").split("\n")[0] ?? "";
+});
+
+await step("a server that will not start names itself", async () => {
+  const outcome = await run(callCapability, {
+    name: "mcpAdd",
+    input: { name: "broken", command: "kody-no-such-binary" },
+  });
+  assert.match(outcome.error ?? "", /MCP server "broken" would not start/);
+  const listed = await run(callCapability, { name: "mcpList", input: {} });
+  const names = (listed.result as Array<McpView>).map((server) => server.name);
+  assert.ok(!names.includes("broken"), "the broken server was saved anyway");
+  return (outcome.error ?? "").split("\n")[0]?.slice(0, 90) ?? "";
 });
 
 await step("two proxies share one daemon concurrently", async () => {

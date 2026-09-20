@@ -59,6 +59,19 @@ const migrations: Array<string> = [
      last_error text,
      created_at text not null
    )`,
+  `create table mcp_servers (
+     name text primary key,
+     transport text not null,
+     command text,
+     args text,
+     env text,
+     url text,
+     auth text not null default 'none',
+     enabled integer not null default 1,
+     instructions text,
+     tool_names text,
+     created_at text not null
+   )`,
 ];
 
 let database: DatabaseSync | null = null;
@@ -585,5 +598,131 @@ export function deleteIntegration(id: string) {
   const info = getDatabase()
     .prepare("delete from integrations where id = ?")
     .run(id);
+  return { deleted: Number(info.changes) > 0 };
+}
+
+// Another MCP server this one can call. The agent reaches its tools from
+// sandbox code as kody.mcp.<server>.<tool>(args); they never become MCP tools
+// of local-kody's own.
+export type McpServerConfig = {
+  name: string;
+  transport: "stdio" | "http";
+  command: string | null;
+  args: Array<string>;
+  env: Record<string, string>;
+  url: string | null;
+  auth: string;
+  enabled: boolean;
+  instructions: string | null;
+  toolNames: Array<string>;
+  createdAt: string;
+};
+
+type McpServerRow = {
+  name: string;
+  transport: string;
+  command: string | null;
+  args: string | null;
+  env: string | null;
+  url: string | null;
+  auth: string;
+  enabled: number;
+  instructions: string | null;
+  tool_names: string | null;
+  created_at: string;
+};
+
+function toMcpServer(row: McpServerRow): McpServerConfig {
+  return {
+    name: row.name,
+    transport: row.transport === "http" ? "http" : "stdio",
+    command: row.command,
+    args: row.args === null ? [] : (JSON.parse(row.args) as Array<string>),
+    env:
+      row.env === null ? {} : (JSON.parse(row.env) as Record<string, string>),
+    url: row.url,
+    auth: row.auth,
+    enabled: row.enabled === 1,
+    instructions: row.instructions,
+    toolNames:
+      row.tool_names === null
+        ? []
+        : (JSON.parse(row.tool_names) as Array<string>),
+    createdAt: row.created_at,
+  };
+}
+
+export function listMcpServers() {
+  const rows = getDatabase()
+    .prepare("select * from mcp_servers order by name")
+    .all() as Array<McpServerRow>;
+  return rows.map(toMcpServer);
+}
+
+export function getMcpServer(name: string) {
+  const row = getDatabase()
+    .prepare("select * from mcp_servers where name = ?")
+    .get(name) as McpServerRow | undefined;
+  return row ? toMcpServer(row) : null;
+}
+
+export function saveMcpServer(config: {
+  name: string;
+  transport: "stdio" | "http";
+  command?: string | null;
+  args?: Array<string>;
+  env?: Record<string, string>;
+  url?: string | null;
+  auth?: string;
+}) {
+  getDatabase()
+    .prepare(
+      `insert into mcp_servers (name, transport, command, args, env, url, auth, enabled, created_at)
+       values (?, ?, ?, ?, ?, ?, ?, 1, ?)
+       on conflict (name) do update set
+         transport = excluded.transport,
+         command = excluded.command,
+         args = excluded.args,
+         env = excluded.env,
+         url = excluded.url,
+         auth = excluded.auth`,
+    )
+    .run(
+      config.name,
+      config.transport,
+      config.command ?? null,
+      JSON.stringify(config.args ?? []),
+      JSON.stringify(config.env ?? {}),
+      config.url ?? null,
+      config.auth ?? "none",
+      new Date().toISOString(),
+    );
+  return getMcpServer(config.name);
+}
+
+// Cached at add time so search can describe a server without starting it.
+export function setMcpDiscovery(
+  name: string,
+  discovery: { instructions: string | null; toolNames: Array<string> },
+) {
+  getDatabase()
+    .prepare(
+      "update mcp_servers set instructions = ?, tool_names = ? where name = ?",
+    )
+    .run(discovery.instructions, JSON.stringify(discovery.toolNames), name);
+  return getMcpServer(name);
+}
+
+export function setMcpEnabled(name: string, enabled: boolean) {
+  getDatabase()
+    .prepare("update mcp_servers set enabled = ? where name = ?")
+    .run(enabled ? 1 : 0, name);
+  return getMcpServer(name);
+}
+
+export function deleteMcpServer(name: string) {
+  const info = getDatabase()
+    .prepare("delete from mcp_servers where name = ?")
+    .run(name);
   return { deleted: Number(info.changes) > 0 };
 }
