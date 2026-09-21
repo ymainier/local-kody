@@ -26,8 +26,33 @@ export type Preset = {
   authParams?: Record<string, string>;
   tokenAuth?: "body" | "basic";
   redirectPort?: number;
+  setupUrl: string;
   note: string;
 };
+
+// What to register with the provider. A provider that matches the redirect URI
+// exactly needs a fixed port; one that allows any loopback port needs the app
+// registered as a desktop client, which is the type that permits it.
+export function redirectAdvice(preset: Preset) {
+  return preset.redirectPort
+    ? `Register this redirect URI exactly: http://127.0.0.1:${preset.redirectPort}/callback`
+    : "Register the app as a desktop or installed client, not a web client: that type allows a loopback redirect on any 127.0.0.1 port, and there is no URI to type in.";
+}
+
+// Providers local-kody knows how to talk to, and what the user has to do
+// before any of them works. Surfaced through search so the agent can relay the
+// setup rather than guess at it.
+export function describePresets() {
+  return Object.entries(readPresets()).map(([id, preset]) => ({
+    id,
+    configured: getIntegration(id) !== null,
+    setupUrl: preset.setupUrl,
+    redirect: redirectAdvice(preset),
+    scopes: preset.scopes,
+    allowedHosts: preset.allowedHosts,
+    note: preset.note,
+  }));
+}
 
 export function readPresets() {
   return JSON.parse(readFileSync(oauthPresetsFile, "utf8")) as Record<
@@ -182,6 +207,16 @@ async function storeTokens(id: string, payload: TokenPayload) {
   });
 }
 
+// A provider we ship a preset for has setup steps worth reading; one we do
+// not needs every URL supplied by hand.
+function notConfiguredError(id: string) {
+  return new Error(
+    readPresets()[id]
+      ? `No integration "${id}" yet. Open the search entity "integration-preset:${id}" for the setup steps to give the user; only they can register the OAuth app.`
+      : `No integration "${id}". Ask the user to run: npm run integration -- add ${id} --client-id <id> --client-secret <secret> --auth-url <url> --token-url <url> --host <host>`,
+  );
+}
+
 const pending = new Map<string, Server>();
 
 function listenForCallback(config: Integration) {
@@ -202,11 +237,7 @@ export async function startIntegration(input: {
   scopes?: Array<string>;
 }) {
   const config = getIntegration(input.id);
-  if (!config) {
-    throw new Error(
-      `No integration "${input.id}". Ask the user to run: npm run integration -- add ${input.id} --client-id <id> --client-secret <secret>`,
-    );
-  }
+  if (!config) throw notConfiguredError(input.id);
   const clientSecret = await keychain().get(keyFor(input.id, "client_secret"));
   if (clientSecret === null) {
     throw new Error(
@@ -375,11 +406,7 @@ function refreshAccessToken(id: string) {
 // comes first so an unapproved host never costs a refresh.
 export async function accessTokenFor(id: string, host: string) {
   const config = getIntegration(id);
-  if (!config) {
-    throw new Error(
-      `No integration "${id}". Ask the user to run: npm run integration -- add ${id} --client-id <id> --client-secret <secret>, then call kody.integrationStart({ id: '${id}' }).`,
-    );
-  }
+  if (!config) throw notConfiguredError(id);
   if (!config.allowedHosts.includes(host)) {
     throw new Error(
       `Integration "${id}" is not approved for host ${host}. Ask the user to run: npm run integration -- allow ${id} ${host}`,

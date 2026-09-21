@@ -57,7 +57,7 @@ npm run integration -- add google --client-id xxx.apps.googleusercontent.com --c
 npm run integration -- list
 ```
 
-Known ids (`google`, `linear`, `notion`, `github`) fill in their URLs, scopes and API hosts from `presets/oauth-providers.json`; anything else takes `--auth-url`, `--token-url` and `--host`. Connecting is the agent's job and yours together: ask it to run `kody.integrationStart({ id })`, approve the page that opens, and the daemon's loopback listener finishes the exchange. Code then writes `{{integration:google}}` where a bearer token goes, and the host refreshes the token when it is about to expire.
+Known ids (`google`, `linear`, `notion`, `github`) fill in their URLs, scopes and API hosts from `presets/oauth-providers.json`; anything else takes `--auth-url`, `--token-url` and `--host`. `npm run integration -- presets` prints what each provider wants when you register the app, and the agent can read the same thing through `search({ entity: "integration-preset:google" })`. The callback differs by provider: Google, as a **Desktop app** client, allows a loopback redirect on any port and needs no URI typed in, while Linear, Notion and GitHub match exactly, so register `http://127.0.0.1:8765/callback`. Connecting is the agent's job and yours together: ask it to run `kody.integrationStart({ id })`, approve the page that opens, and the daemon's loopback listener finishes the exchange. Code then writes `{{integration:google}}` where a bearer token goes, and the host refreshes the token when it is about to expire.
 
 ## Where state lives
 

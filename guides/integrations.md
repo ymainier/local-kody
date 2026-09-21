@@ -16,6 +16,14 @@ export default async function main({ calendarId }) {
 
 Start with `kody.integrationList()`. It gives you each id, its status, its scopes and its approved hosts, and no tokens.
 
+## When there is nothing in the list
+
+An empty `integrationList` means no provider is set up, not that the user has no account. local-kody ships presets for Google, Linear, Notion and GitHub, and `search({ entity: "integration-preset:google" })` gives you the exact steps to relay: where to register the OAuth app, which client type and callback URL that provider needs, the default scopes, and the `npm run integration -- add` command with them filled in.
+
+Relay those steps and stop. Registering an OAuth app is the user's, and getting the client type or the callback wrong is the usual way this fails. Get the scopes right before they register, too: widening them later means approving again.
+
+For a provider with no preset, they also need `--auth-url`, `--token-url` and `--host`.
+
 ## Connecting one
 
 `status: "not_connected"` or `"needs_reconnect"` means there is nothing to spend yet. Call `kody.integrationStart({ id })`. It returns an authorize URL and opens it in the user's browser.

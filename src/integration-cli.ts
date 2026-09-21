@@ -1,5 +1,5 @@
 import { ask, readFlags } from "./daemon-client.ts";
-import { readPresets } from "./integrations.ts";
+import { readPresets, redirectAdvice } from "./integrations.ts";
 
 // Configuring a provider means handing over a client id and secret from an app
 // you registered, which is a user job. Connecting it is the agent's, through
@@ -62,7 +62,13 @@ switch (command) {
     break;
   case "presets":
     for (const [id, preset] of Object.entries(readPresets())) {
-      console.log(`${id}: ${preset.note}`);
+      console.log(`\n${id}`);
+      console.log(`  register at: ${preset.setupUrl}`);
+      console.log(`  callback:    ${redirectAdvice(preset)}`);
+      console.log(
+        `  scopes:      ${preset.scopes.join(", ") || "none by default"}`,
+      );
+      console.log(`  ${preset.note}`);
     }
     break;
   default:

@@ -11,7 +11,7 @@ import {
   listCapabilities,
   type Capability,
 } from "./registry.ts";
-import { describeIntegrations } from "./integrations.ts";
+import { describeIntegrations, describePresets } from "./integrations.ts";
 import { describeMcpServers, listMcpTools } from "./mcp.ts";
 import { listSecretNames } from "./secrets.ts";
 import type { SearchInput } from "./tools.ts";
@@ -145,12 +145,26 @@ function buildEntries(): Array<SearchEntry> {
     keywordText: server.tools.join(" "),
     bodyText: "mcp server external tool",
   }));
+  // A provider nobody has configured yet still needs to be findable: asking
+  // for a calendar should turn up the setup steps, not an empty list.
+  const presetEntries = describePresets()
+    .filter((preset) => !preset.configured)
+    .map((preset) => ({
+      ref: `integration-preset:${preset.id}`,
+      domain: "integrations",
+      title: preset.id,
+      summary: `${preset.id} is supported but not set up yet. Open this ref for the steps to give the user.`,
+      nameText: preset.id,
+      keywordText: `${preset.scopes.join(" ")} ${preset.allowedHosts.join(" ")}`,
+      bodyText: `oauth connect account login setup ${preset.note}`,
+    }));
   return [
     ...capabilityEntries,
     ...packageEntries,
     ...guideEntries,
     ...secretEntries,
     ...integrationEntries,
+    ...presetEntries,
     ...mcpEntries,
   ];
 }
@@ -301,8 +315,27 @@ async function entityDetail(ref: string) {
       `Write \`{{integration:${id}}}\` where the bearer token goes; the host substitutes and refreshes it. Read guide:integrations.`,
     ].join("\n");
   }
+  if (type === "integration-preset") {
+    const preset = describePresets().find((candidate) => candidate.id === id);
+    if (!preset) return `No preset for "${id}".`;
+    return [
+      `## integration-preset:${id}`,
+      preset.configured
+        ? `Already configured. Open integration:${id} for its status.`
+        : "Not configured yet. Only the user can do these steps, so relay them and stop.",
+      "",
+      `1. Register an OAuth app: ${preset.setupUrl}`,
+      `2. ${preset.redirect}`,
+      `3. Run: \`npm run integration -- add ${id} --client-id <id> --client-secret <secret>\``,
+      `   Scopes default to: ${preset.scopes.join(", ") || "none"}. Add \`--scope <scope>\` for each extra one, before they register anything.`,
+      `4. Then you call \`kody.integrationStart({ id: '${id}' })\` and they approve in the browser.`,
+      "",
+      `Approved API hosts: ${preset.allowedHosts.join(", ")}`,
+      `Provider notes: ${preset.note}`,
+    ].join("\n");
+  }
   if (type === "mcp-server") return await mcpServerDetail(id);
-  return `Unknown ref "${ref}". Types: capability, package, guide, secret, integration, mcp-server.`;
+  return `Unknown ref "${ref}". Types: capability, package, guide, secret, integration, integration-preset, mcp-server.`;
 }
 
 function domainIndex(entries: Array<SearchEntry>) {

@@ -869,6 +869,26 @@ const callWhoami = `export default async function main(params) {
   return await response.json()
 }`;
 
+await step("an unset-up provider is findable with its steps", async () => {
+  const { text } = await callText("search", {
+    query: "check my google calendar this week",
+  });
+  assert.match(text.split("\n")[1] ?? "", /integration-preset:google/);
+  const detail = await callText("search", {
+    entity: "integration-preset:google",
+  });
+  assert.match(detail.text, /console\.cloud\.google\.com/);
+  assert.match(detail.text, /desktop or installed client/);
+  assert.match(detail.text, /npm run integration -- add google/);
+  const asked = await run(
+    `import { kody } from 'kody:runtime'
+export default async function main(params) { return await kody.integrationStart(params) }`,
+    { id: "google" },
+  );
+  assert.match(asked.error ?? "", /integration-preset:google/);
+  return text.split("\n")[1] ?? "";
+});
+
 await step("the CLI configures a provider, not yet connected", async () => {
   await runIntegrationCli([
     "add",
