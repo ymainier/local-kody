@@ -8,7 +8,7 @@ The pitch in one line: an agent gets a durable home on your Mac. It can write co
 
 Most MCP servers grow a tool per feature. Twenty tools in, the model spends its attention choosing between them and picks wrong. local-kody has two, forever:
 
-- `search` finds things: capabilities, saved packages, guides, secret names.
+- `search` finds things: capabilities, saved packages, guides, secret names, integrations, other MCP servers.
 - `execute` runs one TypeScript module in a sandbox.
 
 Everything else is a **capability**, a Zod-typed function in the host process that sandboxed code calls as `kody.notifySelf({ title, message })`. Capabilities are not MCP tools. The model finds them through `search` and calls them through `execute`. Adding a feature means adding a capability, and the tool list stays at two.
@@ -90,7 +90,7 @@ Both replacements live in `runtime-core.js`, which loads once per run no matter 
 
 ## The gateway, and how secrets work
 
-The gateway is an HTTP server on a random localhost port with five routes: `/call` runs a capability, `/fetch` performs a request, `/storage` reads and writes a package's bucket, `/log` collects a line, `/settle` delivers the final result. Every request carries the run id in a header, and a request for an unknown or finished run is refused.
+The gateway is an HTTP server on a random localhost port with six routes: `/call` runs a capability, `/fetch` performs a request, `/storage` reads and writes a package's bucket, `/mcp` calls a tool on another MCP server, `/log` collects a line, `/settle` delivers the final result. Every request carries the run id in a header, and a request for an unknown or finished run is refused.
 
 Secrets are the reason the fetch proxy exists. Code writes a placeholder:
 
@@ -304,7 +304,7 @@ Start with `src/executor.ts`. It is the whole idea in one file: build the import
 | `src/executor.ts`     | Import map, scopes, runtime modules, `deno run`             |
 | `src/gateway.ts`      | The sandbox's only reachable address                        |
 | `src/registry.ts`     | `defineCapability`, Zod validation                          |
-| `src/capabilities.ts` | The nine capabilities themselves                            |
+| `src/capabilities.ts` | The sixteen capabilities themselves                         |
 | `src/publish.ts`      | Staging, pinning, `deno check`, dry import, swap            |
 | `src/jobs.ts`         | Job views, running one, the coalescing tick                 |
 | `src/runs.ts`         | Recording, replay by key, reconciliation                    |

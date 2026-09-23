@@ -4,7 +4,7 @@ import { z } from "zod";
 // forwards), so both advertise exactly the same two tools.
 export const instructions = `local-kody gives you a durable home: saved code (packages), secrets you can use but never read, and small state.
 Two tools only:
-1. search: find capabilities, saved packages, guides and secret names. Call it first. Open an entity ref to get its input type and a ready-to-run module.
+1. search: find capabilities, saved packages, guides, secret names, integrations and other MCP servers. Call it first. Open an entity ref to get its input type and a ready-to-run module.
 2. execute: run ONE TypeScript ES module in a locked-down Deno sandbox. Default-export an async function main(params). Put varying values in params, not in the code.
 Inside execute:
 - import { kody } from 'kody:runtime' and call capabilities as await kody.<name>(input).
@@ -49,7 +49,7 @@ export const executeInputSchema = z.object({
 export type ExecuteInput = z.infer<typeof executeInputSchema>;
 
 export const searchToolDescription =
-  "Find capabilities, saved packages, guides and secret names. Empty input lists domains. Pass entity refs to open details and a ready-to-run execute module.";
+  "Find capabilities, saved packages, guides, secret names, integrations and other MCP servers. Empty input lists domains. Pass entity refs to open details and a ready-to-run execute module.";
 
 export const executeToolDescription =
   "Run one TypeScript ES module in a sandbox (no filesystem, no env, network only via the host). `import { kody } from 'kody:runtime'` for capabilities; npm packages import by bare name; fetch supports {{secret:name}} placeholders. Pass idempotencyKey on anything slow or with side effects, then reuse that key to recover the result after a timeout.";

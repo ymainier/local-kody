@@ -2,7 +2,7 @@
 
 A local, single-user take on [kentcdodds/kody](https://github.com/kentcdodds/kody): an MCP server with exactly two tools.
 
-- `search` finds capabilities, saved packages, guides and secret names.
+- `search` finds capabilities, saved packages, guides, secret names, integrations and other MCP servers.
 - `execute` runs one TypeScript module in a Deno sandbox. The sandbox has no filesystem, no env, no subprocesses, and network access to one local gateway port only.
 
 Inside `execute`, code calls `kody.<capability>()`, imports npm packages by bare name, imports saved packages as `kody:@me/<leaf>/<export>`, keeps state in `packageStorage()`, and writes `{{secret:name}}` wherever a credential goes. The gateway swaps in the real value, and only for hosts you approved.
@@ -30,7 +30,7 @@ The process your MCP client spawns is a proxy and nothing else. Claude Desktop o
 
 ```bash
 npm install
-npm test               # 46 checks: the scheduler with a fake clock, then end-to-end over MCP stdio
+npm test               # 47 checks: the scheduler with a fake clock, then end-to-end over MCP stdio
 npm run daemon:install # launchd agent: starts at login, restarts after a crash
 ```
 
@@ -168,27 +168,27 @@ curl -s --unix-socket /tmp/kody.sock -X POST http://localhost/scheduler/tick -d 
 
 ## Layout
 
-| File                     | Role                                                                                   |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| `src/server.ts`          | MCP stdio proxy: forwards `search` and `execute` to the daemon socket                  |
-| `src/daemon.ts`          | Long-lived host: store, gateway, executor, search, scheduler                           |
-| `src/tools.ts`           | The two tool schemas and the server instructions, shared by both                       |
-| `src/launchd.ts`         | `daemon:install` / `daemon:uninstall` / `daemon:logs`                                  |
-| `src/registry.ts`        | `defineCapability`, Zod-validated host functions                                       |
-| `src/capabilities.ts`    | The sixteen capabilities listed above                                                  |
-| `src/search.ts`          | Lexical ranking, domain index, entity detail with ready-to-run modules                 |
-| `src/executor.ts`        | Import scanning, import map and scopes, `deno run` with locked permissions             |
-| `src/gateway.ts`         | The sandbox's only reachable address: `/call`, `/fetch`, `/storage`, `/log`, `/settle` |
-| `src/secrets.ts`         | Secret metadata and `{{secret:name}}` substitution per approved host                   |
-| `src/keychain.ts`        | Where a secret's value lives: the macOS Keychain, or a file under test                 |
-| `src/placeholders.ts`    | One substitution pass over `{{secret:name}}` and `{{integration:id}}`                  |
-| `src/integrations.ts`    | OAuth: the PKCE connect flow, the loopback listener, refresh with a single-flight lock |
-| `src/mcp.ts`             | Calling other MCP servers: lazy connection pool, auth, tool calls                      |
-| `src/daemon-client.ts`   | How the proxy and both CLIs reach the daemon socket                                    |
-| `src/packages.ts`        | Reading saved packages, `kody:@scope/leaf/export` resolution, job schema               |
-| `src/publish.ts`         | `packageSave`: staging, pinned versions, `deno check`, dry import, swap                |
-| `src/package-storage.ts` | Which package owns a bucket, and the one-time import of phase 1 JSON                   |
-| `src/store.ts`           | SQLite: versioned migrations, package storage, runs, job state                         |
-| `src/runs.ts`            | Recording a run, replay by key, reconciling interrupted runs                           |
-| `src/jobs.ts`            | Package-declared jobs: listing, running, enabling, the coalescing tick                 |
-| `guides/*.md`            | Docs for the agent, found through search                                               |
+| File                     | Role                                                                                           |
+| ------------------------ | ---------------------------------------------------------------------------------------------- |
+| `src/server.ts`          | MCP stdio proxy: forwards `search` and `execute` to the daemon socket                          |
+| `src/daemon.ts`          | Long-lived host: store, gateway, executor, search, scheduler                                   |
+| `src/tools.ts`           | The two tool schemas and the server instructions, shared by both                               |
+| `src/launchd.ts`         | `daemon:install` / `daemon:uninstall` / `daemon:logs`                                          |
+| `src/registry.ts`        | `defineCapability`, Zod-validated host functions                                               |
+| `src/capabilities.ts`    | The sixteen capabilities listed above                                                          |
+| `src/search.ts`          | Lexical ranking, domain index, entity detail with ready-to-run modules                         |
+| `src/executor.ts`        | Import scanning, import map and scopes, `deno run` with locked permissions                     |
+| `src/gateway.ts`         | The sandbox's only reachable address: `/call`, `/fetch`, `/storage`, `/mcp`, `/log`, `/settle` |
+| `src/secrets.ts`         | Secret metadata and `{{secret:name}}` substitution per approved host                           |
+| `src/keychain.ts`        | Where a secret's value lives: the macOS Keychain, or a file under test                         |
+| `src/placeholders.ts`    | One substitution pass over `{{secret:name}}` and `{{integration:id}}`                          |
+| `src/integrations.ts`    | OAuth: the PKCE connect flow, the loopback listener, refresh with a single-flight lock         |
+| `src/mcp.ts`             | Calling other MCP servers: lazy connection pool, auth, tool calls                              |
+| `src/daemon-client.ts`   | How the proxy and both CLIs reach the daemon socket                                            |
+| `src/packages.ts`        | Reading saved packages, `kody:@scope/leaf/export` resolution, job schema                       |
+| `src/publish.ts`         | `packageSave`: staging, pinned versions, `deno check`, dry import, swap                        |
+| `src/package-storage.ts` | Which package owns a bucket, and the one-time import of phase 1 JSON                           |
+| `src/store.ts`           | SQLite: versioned migrations, package storage, runs, job state                                 |
+| `src/runs.ts`            | Recording a run, replay by key, reconciling interrupted runs                                   |
+| `src/jobs.ts`            | Package-declared jobs: listing, running, enabling, the coalescing tick                         |
+| `guides/*.md`            | Docs for the agent, found through search                                                       |
